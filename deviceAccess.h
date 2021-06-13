@@ -9,6 +9,7 @@
 #include <QSerialPortInfo>
 #include <QTcpSocket>
 #include <QUdpSocket>
+#include <QDir>
 
 #define QDEVICE_BUFFER_SIZE 16384
 
