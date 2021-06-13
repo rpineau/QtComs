@@ -258,7 +258,6 @@ void serialPort::getPortList(std::vector<std::string> &portList)
         if(!portInfo.portName().startsWith("tty.", Qt::CaseInsensitive) ) // for macOS
             portList.push_back(portInfo.portName().toUtf8().constData());
     }
-
 #ifndef _WIN32
     // get symlinks
     QDir deviceDir("/dev");
@@ -277,7 +276,7 @@ void serialPort::getPortList(std::vector<std::string> &portList)
     }
 #endif
 }
- 
+
 void serialPort::setReadBufferSize(const int &nBufferSize)
 {
     m_ReadBufferSize = qint64(nBufferSize);
