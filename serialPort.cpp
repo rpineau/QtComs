@@ -251,9 +251,6 @@ void serialPort::setRTS(bool bState)
 void serialPort::getPortList(std::vector<std::string> &portList)
 {
     QList<QSerialPortInfo> myList;
-    QDir deviceDir("/dev");
-    std::string qsTmp;
-
     portList.clear();
     // get serial devices
     myList = QSerialPortInfo::availablePorts();
@@ -261,20 +258,26 @@ void serialPort::getPortList(std::vector<std::string> &portList)
         if(!portInfo.portName().startsWith("tty.", Qt::CaseInsensitive) ) // for macOS
             portList.push_back(portInfo.portName().toUtf8().constData());
     }
+
+#ifndef _WIN32
     // get symlinks
+    QDir deviceDir("/dev");
+    std::string sTmp;
+    QFileInfo fileInfo;
     deviceDir.setFilter(QDir::Files);
     QFileInfoList fileList = deviceDir.entryInfoList();
     for (int i = 0; i < fileList.size(); ++i) {
-        QFileInfo fileInfo = fileList.at(i);
+        fileInfo = fileList.at(i);
         if(fileInfo.isSymLink()) {
-            qsTmp = fileInfo.symLinkTarget().toStdString();
-            if (std::find(portList.begin(), portList.end(), qsTmp) != portList.end()) {
+            sTmp = QFileInfo(fileInfo.symLinkTarget()).baseName().toStdString();
+            if (std::find(portList.begin(), portList.end(), sTmp) != portList.end()) {
                 portList.push_back(fileInfo.fileName().toStdString());
             }
         }
     }
- }
-
+#endif
+}
+ 
 void serialPort::setReadBufferSize(const int &nBufferSize)
 {
     m_ReadBufferSize = qint64(nBufferSize);
