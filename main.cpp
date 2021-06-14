@@ -22,7 +22,13 @@ int main(int argc, char *argv[])
     double dAz;
     bool bComplete;
     bool bShutterPresent;
-    
+
+    serialPort::getPortList(portList);
+
+    for(i=0;i<portList.size(); i++)
+        printf("Port %s detected\n", portList.at(i).c_str());
+
+/*
     CRTIDome mDome;
 
     mDome.setConnectionType(TYPE_TCP);
@@ -58,7 +64,7 @@ int main(int argc, char *argv[])
         printf("isCloseComplete : %s\n", bComplete?"Yes":"No");
     // }
     mDome.Disconnect();
-    
+    */
     /*
     serialPort::getPortList(portList);
 
