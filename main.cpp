@@ -68,9 +68,6 @@ int main(int argc, char *argv[])
     /*
     serialPort::getPortList(portList);
 
-    for(i=0;i<portList.size(); i++)
-        printf("Port %s detected\n", portList.at(i).c_str());
-
     CPegasusController mDMFC;
     CRTIDome mDome;
 
