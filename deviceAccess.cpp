@@ -152,7 +152,7 @@ void deviceAccess::setReadBufferSize(const int &nBufferSize)
 //
 // Platform independent sleep
 //
-void deviceAccess::mySleep(int sleepMs)
+void deviceAccess::msSleep(int sleepMs)
 {
     std::this_thread::sleep_for(std::chrono::milliseconds(sleepMs));
 }

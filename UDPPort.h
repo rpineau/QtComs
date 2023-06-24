@@ -46,7 +46,7 @@ public:
 
 private:
 
-    void            mySleep(int sleepMs); // Platform independent sleep
+    void            msSleep(int sleepMs); // Platform independent sleep
 
     qint64          m_ReadBufferSize;
     bool            m_bPortOpenned;

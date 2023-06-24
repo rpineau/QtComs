@@ -83,7 +83,7 @@ public:
 
 private:
 
-    void            mySleep(int sleepMs); // Platform independent sleep
+    void            msSleep(int sleepMs); // Platform independent sleep
 
 };
 #endif // __DEVICE_PORT__

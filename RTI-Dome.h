@@ -152,10 +152,10 @@ public:
     int setPanId(const int nPanId);
     int getShutterPanId(int &nPanId);
     int isPanIdSet(const int nPanId, bool &bSet);
-    
+
     int restoreDomeMotorSettings();
     int restoreShutterMotorSettings();
-    
+
     void enableRainStatusFile(bool bEnable);
     void getRainStatusFileName(std::string &fName);
     void writeRainStatus();
@@ -179,7 +179,7 @@ public:
     void        setConnectionType(const int nConnectionType);
     void        getConnectionType(int &nConnectionType);
 
-    
+
 protected:
 
     int             domeCommand(const char *cmd, char *result, char respCmdCode, int resultMaxLen, int nTimeout = R_MAX_TIMEOUT);
@@ -197,12 +197,12 @@ protected:
     int             parseFields(const char *pszResp, std::vector<std::string> &svFields, char cSeparator);
 
     deviceAccess    *m_devicePort;
-    
+
     int             m_DeviceConnectionType;
-    
+
     std::string     m_DeviceName;
     int             m_nDevicePort;
-    
+
     bool            m_bNetworkConnected;
 
     bool            m_bIsConnected;
@@ -241,14 +241,14 @@ protected:
     bool            m_bSaveRainStatus;
     int             m_nRainStatus;
     CStopWatch      m_cRainCheckTimer;
-    
+
     std::string     m_IpAddress;
     std::string     m_SubnetMask;
     std::string     m_GatewayIP;
     bool            m_bUseDHCP;
-    
-    void            mySleep(int sleepMs); // Platform independent sleep
-    
+
+    void            msSleep(int sleepMs); // Platform independent sleep
+
 #ifdef PLUGIN_DEBUG
     std::string m_sLogfilePath;
     // timestamp for logs

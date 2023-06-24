@@ -45,7 +45,7 @@ bool TCPDevice::open()
 bool TCPDevice::open(const QString hostnameName, const quint16 nPort)
 {
     m_bPortOpenned = false;
-    
+
     if(hostnameName.isEmpty() && m_HostName.isEmpty())
         return false;
 
@@ -54,9 +54,9 @@ bool TCPDevice::open(const QString hostnameName, const quint16 nPort)
     m_TCPDeviceConnection.setReadBufferSize(m_ReadBufferSize);
     m_TCPDeviceConnection.connectToHost(m_HostName, m_nNetworkPort, QIODevice::ReadWrite, QAbstractSocket::AnyIPProtocol);
 
-    m_TCPDeviceConnection.waitForConnected(1000);    
+    m_TCPDeviceConnection.waitForConnected(1000);
     m_bPortOpenned = (m_TCPDeviceConnection.state()  == QTcpSocket::ConnectedState);
-    
+
     return m_bPortOpenned;
 }
 
@@ -91,7 +91,7 @@ bool TCPDevice::flushDataOut(int msecTimeout)
     if(!m_bPortOpenned) {
         return false;
     }
-    
+
     return m_TCPDeviceConnection.waitForBytesWritten(msecTimeout);
 }
 
@@ -139,7 +139,7 @@ bool TCPDevice::waitForDataReady(const int &nbBytes, const int &msTimeout)
             if(nbByteAvail == 0)
                 nTimeout += 1000; //  bytesAvailable timeout after 1000ms so add this to the current total timeout counter
             else {
-                mySleep(10);
+                msSleep(10);
                 nTimeout += 10; //  we waited 10ms so add this to the current total timeout counter
             }
         }
@@ -181,7 +181,7 @@ int TCPDevice::readData(char *destBuffer, const int &amountOfByteToRead, const i
 bool TCPDevice::writeData(const char *srcBuffer, const int &amountOfByteToWrite, int &nbByteWritten)
 {
     nbByteWritten = int(m_TCPDeviceConnection.write(srcBuffer, quint64(amountOfByteToWrite)));
-    
+
     return (nbByteWritten == amountOfByteToWrite);
 }
 
@@ -195,7 +195,7 @@ void TCPDevice::setReadBufferSize(const int &nBufferSize)
 //
 // Platform independent sleep
 //
-void TCPDevice::mySleep(int sleepMs)
+void TCPDevice::msSleep(int sleepMs)
 {
     std::this_thread::sleep_for(std::chrono::milliseconds(sleepMs));
 }
