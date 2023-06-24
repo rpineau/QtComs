@@ -25,14 +25,30 @@ int main(int argc, char *argv[])
 
     serialPort::getPortList(portList);
 
-    for(i=0;i<portList.size(); i++)
+    for(i=0;i<portList.size(); i++) {
         printf("Port %s detected\n", portList.at(i).c_str());
+/*
+        printf("Opening %s\n", portList.at(i).c_str());
+        bool b_open = false;
+        serialPort *m_devicePort;
+        m_devicePort = new serialPort();
+        b_open = m_devicePort->open(portList.at(i).c_str(), QSerialPort::Baud115200, QSerialPort::Data8, QSerialPort::OneStop, QSerialPort::NoFlowControl, QSerialPort::NoParity, true);
+        if(b_open) {
+            printf("Open ok, closing\n");
+            m_devicePort->clearRxTxBuffers();
+            m_devicePort->close();
+        }
+        else {
+            printf("Error opening %s\n", portList.at(i).c_str());
+        }
+*/
+    }
 
 /*
     CRTIDome mDome;
 
     mDome.setConnectionType(TYPE_TCP);
-    
+
     nErr = mDome.Connect("", "192.168.252.8", 2323);
     if(nErr) {
         printf("Error connecting to dome : %d\n", nErr);
@@ -117,6 +133,6 @@ int main(int argc, char *argv[])
 
     mDMFC.Disconnect();
      */
-    
+
     return 0;
 }
