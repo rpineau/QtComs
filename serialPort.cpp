@@ -142,11 +142,11 @@ bool serialPort::clearRxTxBuffers()
 //
 int serialPort::bytesAvailable()
 {
-    
+
     if(!isOpened()) {
         return 0;
     }
-    
+
     if(!m_SerialDeviceConnection.waitForReadyRead(1000))
         return 0; // we had a timeout
 
@@ -255,13 +255,16 @@ void serialPort::getPortList(std::vector<std::string> &portList)
     // get serial devices
     myList = QSerialPortInfo::availablePorts();
     for (const QSerialPortInfo &portInfo : myList) {
-        if(!portInfo.portName().startsWith("tty.", Qt::CaseInsensitive) ) // for macOS
+        if(!portInfo.portName().startsWith("tty.", Qt::CaseInsensitive) ) {// for macOS
+            // printf("%s : %s\n", portInfo.portName().toUtf8().constData(), portInfo.description().toUtf8().constData());
             portList.push_back(portInfo.portName().toUtf8().constData());
+        }
     }
 #ifndef _WIN32
     // get symlinks
     QDir deviceDir("/dev");
     std::string sTmp;
+    std::vector<std::string>::iterator it;
     QFileInfo fileInfo;
     deviceDir.setFilter(QDir::Files);
     QFileInfoList fileList = deviceDir.entryInfoList();
@@ -269,7 +272,9 @@ void serialPort::getPortList(std::vector<std::string> &portList)
         fileInfo = fileList.at(i);
         if(fileInfo.isSymLink()) {
             sTmp = QFileInfo(fileInfo.symLinkTarget()).baseName().toStdString();
-            if (std::find(portList.begin(), portList.end(), sTmp) != portList.end()) {
+            it = std::find(portList.begin(), portList.end(), sTmp);
+            if (it != portList.end()) {
+                // printf("Symlink to %s : %s added \n", it->c_str(), fileInfo.fileName().toStdString().c_str());
                 portList.push_back(fileInfo.fileName().toStdString());
             }
         }
