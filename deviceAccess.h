@@ -19,6 +19,21 @@
 #define NORESPONSE          3
 #define WRITE_ERROR         4
 
+#define MAKE_ERR_CODE(P_ID, DTYPE, ERR_CODE)  (((P_ID<<24) & 0xff000000) | ((DTYPE<<16) & 0x00ff0000)  | (ERR_CODE & 0x0000ffff))
+enum DeviceAccessErrors {PLUGIN_OK=0, PLUGIN_NOT_CONNECTED, PLUGIN_CANT_CONNECT, BAD_CMD_RESPONSE, PLUGIN_COMMAND_FAILED, COMMAND_TIMEOUT, ERR_RAINING, ERR_BATTERY_LOW, FIRMWARE_NOT_SUPPORTED};
+
+enum HardwareDeviceType {
+		UNKNOWN		= -1,
+	    DOME        = 0,
+		FILTERWHEEL	= 1,
+	    MOUNT       = 2,
+	    FOCUSER     = 3,
+		CAMERA		= 4,
+		ROTATOR		= 5,
+		WEATHER		= 6,
+		POWER       =7,
+};
+
 enum DeviceConnectionType {TYPE_SERIAL = 0, TYPE_TCP, TYPE_UDP, TYPE_UNKNOWN};
 
 class deviceAccess

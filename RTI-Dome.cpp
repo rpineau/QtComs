@@ -15,7 +15,6 @@ CRTIDome::CRTIDome()
     m_devicePort = NULL;
     m_DeviceConnectionType = TYPE_UNKNOWN;
 
-
     m_nNbStepPerRev = 0;
     m_dShutterBatteryVolts = 0.0;
 
@@ -34,12 +33,13 @@ CRTIDome::CRTIDome()
     m_bParked = true;
 
     m_fVersion = 0.0;
+    m_fShutterVersion = 0.0;
+
     m_nHomingTries = 0;
     m_nGotoTries = 0;
 
     m_nIsRaining = NOT_RAINING;
     m_bSaveRainStatus = false;
-    RainStatusfile = NULL;
     m_cRainCheckTimer.Reset();
 
     m_bHomeOnPark = false;
@@ -48,9 +48,6 @@ CRTIDome::CRTIDome()
     m_bShutterPresent = false;
 
     m_nRainStatus = RAIN_UNKNOWN;
-
-    m_DeviceName.clear();
-    m_nDevicePort = 0;
 
     m_bNetworkConnected = false;
 
@@ -61,48 +58,43 @@ CRTIDome::CRTIDome()
 
     m_nShutterState = CLOSED;
 
-#ifdef    PLUGIN_DEBUG
-    Logfile = NULL;
-#endif
+    m_sFirmwareVersion.clear();
+    m_sShutterFirmwareVersion.clear();
 
-    memset(m_szFirmwareVersion,0,SERIAL_BUFFER_SIZE);
-    memset(m_szLogBuffer,0,ND_LOG_BUFFER_SIZE);
 
 #ifdef PLUGIN_DEBUG
-#if defined(SB_WIN_BUILD)
+#if defined(_WIN64) || defined(WIN64) || defined(_WIN32) || defined(WIN32)
     m_sLogfilePath = getenv("HOMEDRIVE");
     m_sLogfilePath += getenv("HOMEPATH");
     m_sLogfilePath += "\\RTI-Dome-Log.txt";
-#elif defined(SB_LINUX_BUILD)
+#elif defined(__linux) || defined(__linux__)
     m_sLogfilePath = getenv("HOME");
     m_sLogfilePath += "/RTI-Dome-Log.txt";
-#elif defined(SB_MAC_BUILD)
+#elif defined(__APPLE__)
     m_sLogfilePath = getenv("HOME");
     m_sLogfilePath += "/RTI-Dome-Log.txt";
 #endif
-    Logfile = fopen(m_sLogfilePath.c_str(), "w");
+    m_sLogFile.open(m_sLogfilePath, std::ios::out |std::ios::trunc);
 #endif
 
-#if defined(SB_WIN_BUILD)
+#if defined(_WIN64) || defined(WIN64) || defined(_WIN32) || defined(WIN32)
     m_sRainStatusfilePath = getenv("HOMEDRIVE");
     m_sRainStatusfilePath += getenv("HOMEPATH");
     m_sRainStatusfilePath += "\\RTI_Rain.txt";
-#elif defined(SB_LINUX_BUILD)
+#elif defined(__linux) || defined(__linux__)
     m_sRainStatusfilePath = getenv("HOME");
     m_sRainStatusfilePath += "/RTI_Rain.txt";
-#elif defined(SB_MAC_BUILD)
+#elif defined(__APPLE__)
     m_sRainStatusfilePath = getenv("HOME");
     m_sRainStatusfilePath += "/RTI_Rain.txt";
 #endif
 
-#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome] Version %3.2f build 2021_03_23_1810.\n", timestamp, PLUGIN_VERSION);
-    fprintf(Logfile, "[%s] [CRTIDome] Constructor Called.\n", timestamp);
-    fprintf(Logfile, "[%s] [CRTIDome] Rains status file : '%s'.\n", timestamp, m_sRainStatusfilePath.c_str());
-    fflush(Logfile);
+#if defined PLUGIN_DEBUG
+#pragma message "Debug on"
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [CRTIDome] Version " << std::fixed << std::setprecision(2) << PLUGIN_VERSION << " build " << __DATE__ << " " << __TIME__ << std::endl;
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [CRTIDome] Constructor Called." << std::endl;
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [CRTIDome] Rains status file : " << m_sRainStatusfilePath<<std::endl;
+    m_sLogFile.flush();
 #endif
 
 }
@@ -111,13 +103,9 @@ CRTIDome::~CRTIDome()
 {
 #ifdef	PLUGIN_DEBUG
     // Close LogFile
-    if (Logfile)
-        fclose(Logfile);
+    if(m_sLogFile.is_open())
+        m_sLogFile.close();
 #endif
-    if(RainStatusfile) {
-        fclose(RainStatusfile);
-        RainStatusfile = NULL;
-    }
 }
 
 int CRTIDome::Connect(const char *pszPort, const char *IpAddr, int nIpPort)
@@ -126,12 +114,10 @@ int CRTIDome::Connect(const char *pszPort, const char *IpAddr, int nIpPort)
     bool bConnectionOpen;
     bool bDummy;
 
+
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::Connect] Called %s\n", timestamp, pszPort);
-    fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [Connect] Called." << std::endl;
+    m_sLogFile.flush();
 #endif
 
     if(!m_devicePort) {
@@ -155,7 +141,7 @@ int CRTIDome::Connect(const char *pszPort, const char *IpAddr, int nIpPort)
     }
     m_bIsConnected = false;
     if(!m_bNetworkConnected) {
-        // 19200 8N1
+        // 115200 8N1 DTR
         m_DeviceName.assign(pszPort);
         m_nDevicePort = 0;
         bConnectionOpen = m_devicePort->open(pszPort, QSerialPort::Baud115200, QSerialPort::Data8, QSerialPort::OneStop, QSerialPort::NoFlowControl, QSerialPort::NoParity, true);
@@ -171,13 +157,10 @@ int CRTIDome::Connect(const char *pszPort, const char *IpAddr, int nIpPort)
         else {
             m_bIsConnected = true;
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-            ltime = time(NULL);
-            timestamp = asctime(localtime(&ltime));
-            timestamp[strlen(timestamp) - 1] = 0;
-            fprintf(Logfile, "[%s] [CRTIDome::Connect] Connection refused or failed\n", timestamp);
-            fflush(Logfile);
+            m_sLogFile << "["<<getTimeStamp()<<"]"<< " [Connect]Connection refused or failed" << std::endl;
+            m_sLogFile.flush();
 #endif
-            return PLUGIN_CONNECTION_FAILED;
+            return PLUGIN_CANT_CONNECT;
         }
     }
 
@@ -185,38 +168,41 @@ int CRTIDome::Connect(const char *pszPort, const char *IpAddr, int nIpPort)
     m_bCalibrating = false;
     m_bUnParking = false;
 
-
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::Connect] connected to %s\n", timestamp, pszPort);
-    fprintf(Logfile, "[%s] [CRTIDome::Connect] connected via network : %s\n", timestamp, m_bNetworkConnected?"Yes":"No");
-    fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [Connect] connected to " << pszPort << std::endl;
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [Connect] connected via network : " << (m_bNetworkConnected?"Yes":"No") << std::endl;
+    m_sLogFile.flush();
 #endif
 
-    getIpAddress(m_IpAddress);
-    getSubnetMask(m_SubnetMask);
-    getIPGateway(m_GatewayIP);
-    getUseDHCP(m_bUseDHCP);
-
+    nErr = getIpAddress(m_IpAddress);
+    if(nErr)
+        m_IpAddress = "";
+    nErr |= getSubnetMask(m_SubnetMask);
+    if(nErr)
+        m_SubnetMask = "";
+    nErr |= getIPGateway(m_GatewayIP);
+    if(nErr)
+        m_GatewayIP = "";
+    nErr |= getUseDHCP(m_bUseDHCP);
+    if(nErr)
+        m_bUseDHCP = false;
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::Connect] Getting Firmware\n", timestamp);
-    fflush(Logfile);
+    if(nErr) {
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [Connect] Board without network feature." << std::endl;
+        m_sLogFile.flush();
+    }
+#endif
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [Connect] Getting Firmware." << std::endl;
+    m_sLogFile.flush();
 #endif
 
     // if this fails we're not properly connected.
-    nErr = getFirmwareVersion(m_szFirmwareVersion, SERIAL_BUFFER_SIZE);
+    nErr = getFirmwareVersion(m_sFirmwareVersion, m_fVersion);
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::Connect] Error Getting Firmware.\n", timestamp);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [Connect] Error Getting Firmware : " << nErr << std::endl;
+        m_sLogFile.flush();
 #endif
         if(!m_devicePort->isOpened()) {
             nErr = PLUGIN_NOT_CONNECTED;
@@ -231,11 +217,8 @@ int CRTIDome::Connect(const char *pszPort, const char *IpAddr, int nIpPort)
     }
 
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::Connect] Got Firmware %s ( %f )\n", timestamp, m_szFirmwareVersion, m_fVersion);
-    fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [Connect]Got Firmware "<<  m_sFirmwareVersion << "( " << std::fixed << std::setprecision(2) << m_fVersion << ")."<< nErr << std::endl;
+    m_sLogFile.flush();
 #endif
     if(m_fVersion < 2.0f && m_fVersion != 0.523f && m_fVersion != 0.522f)  {
         return FIRMWARE_NOT_SUPPORTED;
@@ -244,22 +227,16 @@ int CRTIDome::Connect(const char *pszPort, const char *IpAddr, int nIpPort)
     nErr = getDomeParkAz(m_dCurrentAzPosition);
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::Connect] getDomeParkAz nErr : %d\n", timestamp, nErr);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [Connect] getDomeParkAz nErr : " << nErr << std::endl;
+        m_sLogFile.flush();
 #endif
         return nErr;
     }
     nErr = getDomeHomeAz(m_dHomeAz);
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::Connect] getDomeHomeAz nErr : %d\n", timestamp, nErr);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [Connect] getDomeHomeAz nErr : " << nErr << std::endl;
+        m_sLogFile.flush();
 #endif
         return nErr;
     }
@@ -285,21 +262,18 @@ void CRTIDome::Disconnect()
     m_bUnParking = false;
 
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::Disconnect] m_bIsConnected = %d\n", timestamp, m_bIsConnected);
-    fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [Disconnect] m_bIsConnected : " << (m_bIsConnected?"true":"false") << std::endl;
+    m_sLogFile.flush();
 #endif
 }
 
-
-int CRTIDome::domeCommand(const char *pszCmd, char *pszResult, char respCmdCode, int nResultMaxLen, int nTimeout)
+int CRTIDome::domeCommand(const std::string sCmd, std::string &sResp, char respCmdCode, int nTimeout)
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
     int  nBytesWrite;
     bool bWriteOk;
+
+    std::string localResp;
 
     if(!m_devicePort->isOpened()) {
         return PLUGIN_NOT_CONNECTED;
@@ -308,126 +282,121 @@ int CRTIDome::domeCommand(const char *pszCmd, char *pszResult, char respCmdCode,
     m_devicePort->clearRxTxBuffers();
 
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::domeCommand] sending : %s\n", timestamp, pszCmd);
-    fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [domeCommand] Sending : '" << sCmd <<  "'" << std::endl;
+    m_sLogFile.flush();
 #endif
-    bWriteOk = m_devicePort->writeData(pszCmd, (int)strlen(pszCmd), nBytesWrite);
+    bWriteOk = m_devicePort->writeData(sCmd.c_str(), sCmd.size(), nBytesWrite);
     m_devicePort->flushDataOut();
     if(!bWriteOk)
         return PLUGIN_COMMAND_FAILED;
 
-    if (!respCmdCode)
-        return nErr;
-
-    // read response
-    nErr = readResponse(szResp, SERIAL_BUFFER_SIZE, nTimeout);
-    if(nErr) {
+    if(nErr){
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::domeCommand] ***** ERROR READING RESPONSE **** error = %d , response : %s\n", timestamp, nErr, szResp);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [domeCommand] writeFile error : " << nErr << std::endl;
+        m_sLogFile.flush();
 #endif
         return nErr;
     }
-#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::domeCommand] response : %s\n", timestamp, szResp);
-    fflush(Logfile);
-#endif
 
+    if (respCmdCode == 0x00)
+        return nErr;
 
-    if (szResp[0] != respCmdCode)
+    // read response
+    nErr = readResponse(localResp, nTimeout);
+    if(nErr)
+        return nErr;
+
+    if(!localResp.size())
+        return BAD_CMD_RESPONSE;
+
+    if(localResp.at(0) != respCmdCode)
         nErr = BAD_CMD_RESPONSE;
 
-    if(pszResult && (nErr == PLUGIN_OK ))
-        strncpy(pszResult, &szResp[1], nResultMaxLen);
+    sResp = localResp.substr(1, localResp.size());
+
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [domeCommand] response : " << sResp << std::endl;
+    m_sLogFile.flush();
+#endif
 
     return nErr;
-
 }
 
-int CRTIDome::readResponse(char *szRespBuffer, int nBufferLen, int nTimeout)
+int CRTIDome::readResponse(std::string &sResp, int nTimeout)
 {
     int nErr = PLUGIN_OK;
+    char pszBuf[SERIAL_BUFFER_SIZE];
     int nBytesRead = 0;
     int nTotalBytesRead = 0;
     char *pszBufPtr;
     int nBytesWaiting = 0 ;
     int nbTimeouts = 0;
 
-    memset(szRespBuffer, 0, (size_t) nBufferLen);
-    pszBufPtr = szRespBuffer;
+    sResp.clear();
+    memset(pszBuf, 0, SERIAL_BUFFER_SIZE);
+    pszBufPtr = pszBuf;
 
     do {
-        nBytesWaiting = m_devicePort->bytesAvailable();
+       nBytesWaiting = m_devicePort->bytesAvailable();
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 3
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::readResponse] nBytesWaiting = %d\n", timestamp, nBytesWaiting);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [readResponse] nBytesWaiting = " << nBytesWaiting << std::endl;
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [readResponse] nBytesWaiting nErr = " << nErr << std::endl;
+        m_sLogFile.flush();
 #endif
-        if(nBytesWaiting<=0) {
-            if(nbTimeouts++ >= NB_RX_WAIT) {
-#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-                ltime = time(NULL);
-                timestamp = asctime(localtime(&ltime));
-                timestamp[strlen(timestamp) - 1] = 0;
-                fprintf(Logfile, "[%s] [CRTIDome::readResponse] bytesWaitingRx timeout, no data for %d loops\n", timestamp, NB_RX_WAIT);
-                fflush(Logfile);
+        if(!nBytesWaiting) {
+            nbTimeouts += MAX_READ_WAIT_TIMEOUT;
+            if(nbTimeouts >= nTimeout) {
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 3
+                m_sLogFile << "["<<getTimeStamp()<<"]"<< " [readResponse] bytesWaitingRx timeout, no data for" << nbTimeouts <<" ms" << std::endl;
+                m_sLogFile.flush();
 #endif
-                nErr = PLUGIN_RXTIMEOUT;
+                nErr = COMMAND_TIMEOUT;
                 break;
             }
-            msSleep(MAX_READ_WAIT_TIMEOUT*5);
+            msSleep(MAX_READ_WAIT_TIMEOUT);
             continue;
         }
         nbTimeouts = 0;
-        if(nTotalBytesRead + nBytesWaiting <= nBufferLen)
+        if(nTotalBytesRead + nBytesWaiting <= SERIAL_BUFFER_SIZE)
             nBytesRead = m_devicePort->readData(pszBufPtr, nBytesWaiting, nTimeout);
         else {
-            nErr = PLUGIN_RXTIMEOUT;
+            nErr = COMMAND_TIMEOUT;
             break; // buffer is full.. there is a problem !!
         }
         if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-            ltime = time(NULL);
-            timestamp = asctime(localtime(&ltime));
-            timestamp[strlen(timestamp) - 1] = 0;
-            fprintf(Logfile, "[%s] [CRTIDome::readResponse] readFile error.\n", timestamp);
-            fflush(Logfile);
+            m_sLogFile << "["<<getTimeStamp()<<"]"<< " [readResponse] readFile error." << std::endl;
+            m_sLogFile.flush();
 #endif
             return nErr;
         }
 
         if (nBytesRead != nBytesWaiting) { // timeout
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-            ltime = time(NULL);
-            timestamp = asctime(localtime(&ltime));
-            timestamp[strlen(timestamp) - 1] = 0;
-            fprintf(Logfile, "[%s] [CRTIDome::readResponse] readFile Timeout Error\n", timestamp);
-            fprintf(Logfile, "[%s] [CRTIDome::readResponse] readFile nBytesWaiting = %d\n", timestamp, nBytesWaiting);
-            fprintf(Logfile, "[%s] [CRTIDome::readResponse] readFile ulBytesRead = %d\n", timestamp, nBytesRead);
-            fflush(Logfile);
+            m_sLogFile << "["<<getTimeStamp()<<"]"<< " [readResponse] readFile Timeout Error." << std::endl;
+            m_sLogFile << "["<<getTimeStamp()<<"]"<< " [readResponse] readFile nBytesWaiting = " << nBytesWaiting << std::endl;
+            m_sLogFile << "["<<getTimeStamp()<<"]"<< " [readResponse] readFile nBytesRead =" << nBytesRead << std::endl;
+            m_sLogFile.flush();
 #endif
         }
 
         nTotalBytesRead += nBytesRead;
         pszBufPtr+=nBytesRead;
-    } while (nTotalBytesRead < nBufferLen  && *(pszBufPtr-1) != '#');
+    } while (nTotalBytesRead < SERIAL_BUFFER_SIZE  && *(pszBufPtr-1) != '#');
+
+
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [readResponse] pszBuf = '" << pszBuf << "'" << std::endl;
+    m_sLogFile.flush();
+#endif
+
 
     if(!nTotalBytesRead)
-        nErr = PLUGIN_RXTIMEOUT; // we didn't get an answer.. so timeout
+        nErr = COMMAND_TIMEOUT; // we didn't get an answer.. so timeout
     else
         *(pszBufPtr-1) = 0; //remove the #
 
+    sResp.assign(pszBuf);
     return nErr;
 }
 
@@ -435,7 +404,7 @@ int CRTIDome::readResponse(char *szRespBuffer, int nBufferLen, int nTimeout)
 int CRTIDome::getDomeAz(double &dDomeAz)
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
@@ -443,19 +412,26 @@ int CRTIDome::getDomeAz(double &dDomeAz)
     if(m_bCalibrating)
         return nErr;
 
-    nErr = domeCommand("g#", szResp, 'g', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("g#", sResp, 'g');
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::getDomeAz] ERROR = %s\n", timestamp, szResp);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getDomeAz] ERROR = " << sResp << std::endl;
+        m_sLogFile.flush();
 #endif
         return nErr;
     }
     // convert Az string to double
-    dDomeAz = atof(szResp);
+    try {
+        dDomeAz = std::stof(sResp);
+    }
+    catch(const std::exception& e) {
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getDomeAz] conversion exception = " << e.what() << std::endl;
+        m_sLogFile.flush();
+#endif
+        dDomeAz = 0;
+    }
+
     m_dCurrentAzPosition = dDomeAz;
 
     if(m_cRainCheckTimer.GetElapsedSeconds() > RAIN_CHECK_INTERVAL) {
@@ -468,7 +444,6 @@ int CRTIDome::getDomeAz(double &dDomeAz)
 int CRTIDome::getDomeEl(double &dDomeEl)
 {
     int nErr = PLUGIN_OK;
-    // char szResp[SERIAL_BUFFER_SIZE];
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
@@ -486,33 +461,13 @@ int CRTIDome::getDomeEl(double &dDomeEl)
         return nErr;
     }
 
-// this is not implemented yet
-/*
-    nErr = domeCommand("G#", szResp, 'G', SERIAL_BUFFER_SIZE);
-    if(nErr) {
-#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::getDomeEl] ERROR = %s\n", timestamp, szResp);
-        fflush(Logfile);
-#endif
-        return nErr;
-    }
-
-    // convert El string to double
-    dDomeEl = atof(szResp);
-    m_dCurrentElPosition = dDomeEl;
-
-    return nErr;
- */
 }
 
 
 int CRTIDome::getDomeHomeAz(double &dAz)
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
@@ -520,20 +475,27 @@ int CRTIDome::getDomeHomeAz(double &dAz)
     if(m_bCalibrating)
         return nErr;
 
-    nErr = domeCommand("i#", szResp, 'i', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("i#", sResp, 'i');
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::getDomeHomeAz] ERROR = %s\n", timestamp, szResp);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getDomeHomeAz] ERROR = " << sResp << std::endl;
+        m_sLogFile.flush();
 #endif
         return nErr;
     }
 
     // convert Az string to double
-    dAz = atof(szResp);
+    try {
+        dAz = std::stof(sResp);
+    }
+    catch(const std::exception& e) {
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getDomeHomeAz] conversion exception = " << e.what() << std::endl;
+        m_sLogFile.flush();
+#endif
+        dAz = 0;
+    }
+
     m_dHomeAz = dAz;
     return nErr;
 }
@@ -541,7 +503,7 @@ int CRTIDome::getDomeHomeAz(double &dAz)
 int CRTIDome::getDomeParkAz(double &dAz)
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
@@ -549,27 +511,31 @@ int CRTIDome::getDomeParkAz(double &dAz)
     if(m_bCalibrating)
         return nErr;
 
-    nErr = domeCommand("l#", szResp, 'l', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("l#", sResp, 'l');
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::getDomeParkAz] ERROR = %s\n", timestamp, szResp);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getDomeParkAz] ERROR = " << sResp << std::endl;
+        m_sLogFile.flush();
 #endif
         return nErr;
     }
 
     // convert Az string to double
-    dAz = atof(szResp);
+    try {
+        dAz = std::stof(sResp);
+    }
+    catch(const std::exception& e) {
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getDomeParkAz] conversion exception = " << e.what() << std::endl;
+        m_sLogFile.flush();
+#endif
+        dAz = 0;
+    }
+
     m_dParkAz = dAz;
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::getDomeParkAz] m_dParkAz = %3.2f\n", timestamp, m_dParkAz);
-        fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getDomeParkAz] m_dParkAz = " << std::fixed << std::setprecision(2) << m_dParkAz << std::endl;
+    m_sLogFile.flush();
 #endif
 
     return nErr;
@@ -579,7 +545,7 @@ int CRTIDome::getDomeParkAz(double &dAz)
 int CRTIDome::getShutterState(int &nState)
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
     std::vector<std::string> shutterStateFileds;
 
     if(!m_bIsConnected)
@@ -593,35 +559,35 @@ int CRTIDome::getShutterState(int &nState)
     if(m_bCalibrating)
         return nErr;
 
-    nErr = domeCommand("M#", szResp, 'M', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("M#", sResp, 'M');
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::getShutterState] ERROR = %s\n", timestamp, szResp);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getShutterState] ERROR = " << sResp << std::endl;
+        m_sLogFile.flush();
 #endif
         nState = SHUTTER_ERROR;
         return nErr;
     }
 
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::getShutterState] response = '%s'\n", timestamp, szResp);
-    fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getShutterState] response =  " << sResp << std::endl;
+    m_sLogFile.flush();
 #endif
 
-    nState = atoi(szResp);
+    try {
+        nState = std::stoi(sResp);
+    }
+    catch(const std::exception& e) {
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getShutterState] conversion exception = " << e.what() << std::endl;
+        m_sLogFile.flush();
+#endif
+        nState = 0;
+    }
 
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::getShutterState] nState = '%d'\n", timestamp, nState);
-    fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getShutterState] nState =  " << nState << std::endl;
+    m_sLogFile.flush();
 #endif
 
     return nErr;
@@ -631,24 +597,30 @@ int CRTIDome::getShutterState(int &nState)
 int CRTIDome::getDomeStepPerRev(int &nStepPerRev)
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    nErr = domeCommand("t#", szResp, 't', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("t#", sResp, 't');
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::getDomeStepPerRev] ERROR = %s\n", timestamp, szResp);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getDomeStepPerRev] ERROR = " << sResp << std::endl;
+        m_sLogFile.flush();
 #endif
         return nErr;
     }
 
-    nStepPerRev = atoi(szResp);
+    try {
+        nStepPerRev = std::stoi(sResp);
+    }
+    catch(const std::exception& e) {
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getDomeStepPerRev] conversion exception = " << e.what() << std::endl;
+        m_sLogFile.flush();
+#endif
+        nStepPerRev = 0;
+    }
     m_nNbStepPerRev = nStepPerRev;
     return nErr;
 }
@@ -656,16 +628,16 @@ int CRTIDome::getDomeStepPerRev(int &nStepPerRev)
 int CRTIDome::setDomeStepPerRev(int nStepPerRev)
 {
     int nErr = PLUGIN_OK;
-    char szBuf[SERIAL_BUFFER_SIZE];
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
+    std::stringstream ssTmp;
 
     m_nNbStepPerRev = nStepPerRev;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    snprintf(szBuf, SERIAL_BUFFER_SIZE, "t%d#", nStepPerRev);
-    nErr = domeCommand(szBuf, szResp, 'i', SERIAL_BUFFER_SIZE);
+    ssTmp << "t" << nStepPerRev <<"#";
+    nErr = domeCommand(ssTmp.str(), sResp, 'i');
     return nErr;
 
 }
@@ -673,9 +645,8 @@ int CRTIDome::setDomeStepPerRev(int nStepPerRev)
 int CRTIDome::getBatteryLevels(double &domeVolts, double &dDomeCutOff, double &dShutterVolts, double &dShutterCutOff)
 {
     int nErr = PLUGIN_OK;
-    int rc = 0;
-    char szResp[SERIAL_BUFFER_SIZE];
-
+    std::string sResp;
+    std::vector<std::string> voltsFields;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
@@ -683,88 +654,97 @@ int CRTIDome::getBatteryLevels(double &domeVolts, double &dDomeCutOff, double &d
     if(m_bCalibrating)
         return nErr;
     // Dome
-    nErr = domeCommand("k#", szResp, 'k', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("k#", sResp, 'k');
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::getBatteryLevels] ERROR = %s\n", timestamp, szResp);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getBatteryLevels] ERROR = " << sResp << std::endl;
+        m_sLogFile.flush();
 #endif
         return nErr;
     }
 
-    rc = sscanf(szResp, "%lf,%lf", &domeVolts, &dDomeCutOff);
-    if(rc == 0) {
+    nErr = parseFields(sResp, voltsFields, ',');
+    if(nErr) {
+        return PLUGIN_OK;
+    }
+    if(!voltsFields.size()) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::getBatteryLevels] sscanf ERROR\n", timestamp);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getBatteryLevels] voltsFields is empty" << std::endl;
+        m_sLogFile.flush();
 #endif
-        return PLUGIN_COMMAND_FAILED;
+        return MAKE_ERR_CODE(PLUGIN_ID, DOME, PLUGIN_COMMAND_FAILED);
+    }
+
+    if(voltsFields.size()>1) {
+        try {
+            domeVolts = std::stof(voltsFields[0]);
+            dDomeCutOff = std::stof(voltsFields[1]);
+        }
+        catch(const std::exception& e) {
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+            m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getBatteryLevels] conversion exception = " << e.what() << std::endl;
+            m_sLogFile.flush();
+#endif
+            domeVolts = 0;
+            dDomeCutOff = 0;
+        }
+    }
+    else {
+        domeVolts = 0;
+        dDomeCutOff = 0;
+        return MAKE_ERR_CODE(PLUGIN_ID, DOME, PLUGIN_COMMAND_FAILED);
     }
 
     domeVolts = domeVolts / 100.0;
     dDomeCutOff = dDomeCutOff / 100.0;
 
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::getBatteryLevels] domeVolts = %f\n", timestamp, domeVolts);
-    fprintf(Logfile, "[%s] [CRTIDome::getBatteryLevels] dDomeCutOff = %f\n", timestamp, dDomeCutOff);
-    fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getBatteryLevels] domeVolts = " << std::fixed << std::setprecision(2) << domeVolts << std::endl;
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getBatteryLevels] dDomeCutOff = " << std::fixed << std::setprecision(2) << dDomeCutOff << std::endl;
+    m_sLogFile.flush();
 #endif
 
     dShutterVolts  = 0;
     dShutterCutOff = 0;
     if(m_bShutterPresent) {
-            //  Shutter
+        nErr = domeCommand("K#", sResp, 'K');
+        if(nErr) {
+    #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+            m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getBatteryLevels] ERROR = " << sResp << std::endl;
+            m_sLogFile.flush();
+    #endif
+            dShutterVolts = -1;
+            dShutterCutOff = -1;
+            return nErr;
+        }
+        nErr = parseFields(sResp, voltsFields, ',');
 
-            nErr = domeCommand("K#", szResp, 'K', SERIAL_BUFFER_SIZE);
-            if(nErr) {
-        #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-                ltime = time(NULL);
-                timestamp = asctime(localtime(&ltime));
-                timestamp[strlen(timestamp) - 1] = 0;
-                fprintf(Logfile, "[%s] [CRTIDome::getBatteryLevels] ERROR = %s\n", timestamp, szResp);
-                fflush(Logfile);
-        #endif
-                dShutterVolts = 0;
-                dShutterCutOff = 0;
-                return nErr;
-            }
+        if(!voltsFields.size()) { // no shutter value
+            dShutterVolts = -1;
+            dShutterCutOff = -1;
+            return nErr;
+        }
 
-            if(strlen(szResp)<2) { // no shutter value
-                dShutterVolts = -1;
-                dShutterCutOff = -1;
-                return nErr;
-            }
+        try {
+            dShutterVolts = std::stof(voltsFields[0]);
+            dShutterCutOff = std::stof(voltsFields[1]);
+        }
+        catch(const std::exception& e) {
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+            m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getBatteryLevels] conversion exception = " << e.what() << std::endl;
+            m_sLogFile.flush();
+#endif
+            dShutterVolts = 0;
+            dShutterCutOff = 0;
+        }
 
-            rc = sscanf(szResp, "%lf,%lf", &dShutterVolts, &dShutterCutOff);
-            if(rc == 0) {
-        #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-                ltime = time(NULL);
-                timestamp = asctime(localtime(&ltime));
-                timestamp[strlen(timestamp) - 1] = 0;
-                fprintf(Logfile, "[%s] [CRTIDome::getBatteryLevels] sscanf ERROR\n", timestamp);
-                fflush(Logfile);
-        #endif
-                return PLUGIN_COMMAND_FAILED;
-            }
-            dShutterVolts = dShutterVolts / 100.0;
-            dShutterCutOff = dShutterCutOff / 100.0;
-        #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-            ltime = time(NULL);
-            timestamp = asctime(localtime(&ltime));
-            timestamp[strlen(timestamp) - 1] = 0;
-            fprintf(Logfile, "[%s] [CRTIDome::getBatteryLevels] shutterVolts = %f\n", timestamp, dShutterVolts);
-            fprintf(Logfile, "[%s] [CRTIDome::getBatteryLevels] dShutterCutOff = %f\n", timestamp, dShutterCutOff);
-            fflush(Logfile);
-        #endif
+        dShutterVolts = dShutterVolts / 100.0;
+        dShutterCutOff = dShutterCutOff / 100.0;
+    #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getBatteryLevels] shutterVolts = " << std::fixed << std::setprecision(2) << dShutterVolts << std::endl;
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getBatteryLevels] dShutterCutOff = " << std::fixed << std::setprecision(2) << dShutterCutOff << std::endl;
+        m_sLogFile.flush();
+    #endif
     }
 
     return nErr;
@@ -773,8 +753,8 @@ int CRTIDome::getBatteryLevels(double &domeVolts, double &dDomeCutOff, double &d
 int CRTIDome::setBatteryCutOff(double dDomeCutOff, double dShutterCutOff)
 {
     int nErr = PLUGIN_OK;
-    char szBuf[SERIAL_BUFFER_SIZE];
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
+    std::stringstream ssTmp;
     int nRotCutOff, nShutCutOff;
 
     if(!m_bIsConnected)
@@ -783,42 +763,29 @@ int CRTIDome::setBatteryCutOff(double dDomeCutOff, double dShutterCutOff)
     if(m_bCalibrating)
         return nErr;
 
-    if(m_fVersion < 2.0f) {
-        nRotCutOff =  int(dDomeCutOff/0.0049f)/2;
-        nShutCutOff =  int(dShutterCutOff/0.0049f)/2;
-    }
-    else {
-        nRotCutOff = dDomeCutOff * 100.0;
-        nShutCutOff = dShutterCutOff * 100.0;
-
-    }
+    nRotCutOff = dDomeCutOff * 100.0;
+    nShutCutOff = dShutterCutOff * 100.0;
 
     // Dome
-    snprintf(szBuf, SERIAL_BUFFER_SIZE, "k%d#", nRotCutOff);
-    nErr = domeCommand(szBuf, szResp, 'k', SERIAL_BUFFER_SIZE);
+    ssTmp << "k" << nRotCutOff <<"#";
+    nErr = domeCommand(ssTmp.str(), sResp, 'k');
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::setBatteryCutOff] dDomeCutOff ERROR = %s\n", timestamp, szResp);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [setBatteryCutOff] dDomeCutOff ERROR = " << sResp << std::endl;
+        m_sLogFile.flush();
 #endif
         return nErr;
     }
 
     if(m_bShutterPresent) {
         // Shutter
-
-        snprintf(szBuf, SERIAL_BUFFER_SIZE, "K%d#", nShutCutOff);
-        nErr = domeCommand(szBuf, szResp, 'K', SERIAL_BUFFER_SIZE);
+        std::stringstream().swap(ssTmp);
+        ssTmp << "k" << nShutCutOff <<"#";
+        nErr = domeCommand(ssTmp.str(), sResp, 'K');
         if(nErr) {
     #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-            ltime = time(NULL);
-            timestamp = asctime(localtime(&ltime));
-            timestamp[strlen(timestamp) - 1] = 0;
-            fprintf(Logfile, "[%s] [CRTIDome::setBatteryCutOff] dShutterCutOff ERROR = %s\n", timestamp, szResp);
-            fflush(Logfile);
+            m_sLogFile << "["<<getTimeStamp()<<"]"<< " [setBatteryCutOff] dDomeCutOff ERROR = " << sResp << std::endl;
+            m_sLogFile.flush();
     #endif
             return nErr;
         }
@@ -831,19 +798,16 @@ bool CRTIDome::isDomeMoving()
     bool bIsMoving;
     int nTmp;
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    nErr = domeCommand("m#", szResp, 'm', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("m#", sResp, 'm');
     if(nErr & !m_bCalibrating) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::isDomeMoving] ERROR = %s\n", timestamp, szResp);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isDomeMoving] ERROR = " << sResp << std::endl;
+        m_sLogFile.flush();
 #endif
         return false;
     }
@@ -852,23 +816,26 @@ bool CRTIDome::isDomeMoving()
     }
 
     bIsMoving = false;
-    nTmp = atoi(szResp);
-#ifdef PLUGIN_DEBUG
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] CRTIDome::isDomeMoving nTmp : %d\n", timestamp, nTmp);
-    fflush(Logfile);
+    try {
+        nTmp = std::stoi(sResp);
+    }
+    catch(const std::exception& e) {
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isDomeMoving] conversion exception = " << e.what() << std::endl;
+        m_sLogFile.flush();
 #endif
-    if(nTmp)
+        nTmp = MOVE_NONE;
+    }
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isDomeMoving] nTmp : " << nTmp << std::endl;
+    m_sLogFile.flush();
+#endif
+    if(nTmp != MOVE_NONE)
         bIsMoving = true;
 
-#ifdef PLUGIN_DEBUG
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] CRTIDome::isDomeMoving bIsMoving : %s\n", timestamp, bIsMoving?"True":"False");
-    fflush(Logfile);
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isDomeMoving] bIsMoving : " << (bIsMoving?"True":"False") << std::endl;
+    m_sLogFile.flush();
 #endif
 
     return bIsMoving;
@@ -879,65 +846,61 @@ bool CRTIDome::isDomeAtHome()
     bool bAthome;
     int nTmp;
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    nErr = domeCommand("z#", szResp, 'z', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("z#", sResp, 'z');
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::isDomeAtHome] z# response = %s\n", timestamp, szResp);
-    fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isDomeAtHome] response = " << sResp << std::endl;
+    m_sLogFile.flush();
 #endif
     if(nErr) {
         return false;
     }
 
     bAthome = false;
-    nTmp = atoi(szResp);
+    try {
+        nTmp = std::stoi(sResp);
+    }
+    catch(const std::exception& e) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::isDomeAtHome] nTmp = %d\n", timestamp, nTmp);
-    fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isDomeAtHome] conversion exception = " << e.what() << std::endl;
+        m_sLogFile.flush();
+#endif
+        nTmp = ATHOME;
+    }
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isDomeAtHome] nTmp : " << nTmp << std::endl;
+    m_sLogFile.flush();
 #endif
     if(nTmp == ATHOME)
         bAthome = true;
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] CRTIDome::isDomeAtHome bAthome : %s\n", timestamp, bAthome?"True":"False");
-    fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isDomeAtHome] bAthome : " << (bAthome?"True":"False") << std::endl;
+    m_sLogFile.flush();
 #endif
 
     return bAthome;
-
 }
 
 int CRTIDome::syncDome(double dAz, double dEl)
 {
     int nErr = PLUGIN_OK;
-    char szBuf[SERIAL_BUFFER_SIZE];
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::stringstream ssTmp;
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
     m_dCurrentAzPosition = dAz;
-    snprintf(szBuf, SERIAL_BUFFER_SIZE, "s%3.2f#", dAz);
-    nErr = domeCommand(szBuf, szResp, 's', SERIAL_BUFFER_SIZE);
+    ssTmp << "s" << std::fixed << std::setprecision(2) << dAz << "#";
+    nErr = domeCommand(ssTmp.str(), sResp, 's');
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::syncDome] ERROR = %d\n", timestamp, nErr);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [syncDome] ERROR = " << sResp << std::endl;
+        m_sLogFile.flush();
 #endif
         return nErr;
     }
@@ -971,11 +934,8 @@ int CRTIDome::unparkDome()
     }
     else {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::unparkDome] m_dParkAz = %3.3f\n", timestamp, m_dParkAz);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [unparkDome] m_dParkAz = " << std::fixed << std::setprecision(2) << m_dParkAz << std::endl;
+        m_sLogFile.flush();
 #endif
         syncDome(m_dParkAz, m_dCurrentElPosition);
         m_bParked = false;
@@ -993,8 +953,8 @@ int CRTIDome::gotoAzimuth(double dNewAz)
     double dShutterVolts;
     double dShutterCutOff;
     bool bDummy;
-    char szBuf[SERIAL_BUFFER_SIZE];
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::stringstream ssTmp;
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
@@ -1003,26 +963,22 @@ int CRTIDome::gotoAzimuth(double dNewAz)
     if(m_bShutterPresent) {
         getBatteryLevels(domeVolts, dDomeCutOff, dShutterVolts, dShutterCutOff);
         if(dShutterVolts < dShutterCutOff)
-            return PLUGIN_DEVICEPARKED; // dome has parked to charge the shutter battery, don't move !
+            return ERR_BATTERY_LOW; // dome has parked to charge the shutter battery, don't move !
     }
     while(dNewAz >= 360)
         dNewAz = dNewAz - 360;
 
-    snprintf(szBuf, SERIAL_BUFFER_SIZE, "g%3.2f#", dNewAz);
-    nErr = domeCommand(szBuf, szResp, 'g', SERIAL_BUFFER_SIZE);
+    ssTmp << "g" << std::fixed << std::setprecision(2) << dNewAz << "#";
+    nErr = domeCommand(ssTmp.str(), sResp, 'g');
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::gotoAzimuth] ERROR = %d\n", timestamp, nErr);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [gotoAzimuth] ERROR = " << sResp << std::endl;
+        m_sLogFile.flush();
 #endif
         return nErr;
     }
 
     m_dGotoAz = dNewAz;
-    m_nGotoTries = 0;
     return nErr;
 }
 
@@ -1030,7 +986,7 @@ int CRTIDome::openShutter()
 {
     int nErr = PLUGIN_OK;
     bool bDummy;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
     double domeVolts;
     double dDomeCutOff;
     double dShutterVolts;
@@ -1044,11 +1000,8 @@ int CRTIDome::openShutter()
 
     getShutterPresent(bDummy);
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::openShutter] m_bShutterPresent = %s\n", timestamp, m_bShutterPresent?"Yes":"No");
-    fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [openShutter] m_bShutterPresent : " << (m_bShutterPresent?"True":"False") << std::endl;
+    m_sLogFile.flush();
 #endif
     if(!m_bShutterPresent) {
         return PLUGIN_OK;
@@ -1056,34 +1009,38 @@ int CRTIDome::openShutter()
 
     getBatteryLevels(domeVolts, dDomeCutOff, dShutterVolts, dShutterCutOff);
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::openShutter] Opening shutter\n", timestamp);
-    fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [openShutter] Opening shutter" << std::endl;
+    m_sLogFile.flush();
 #endif
 
-
-    nErr = domeCommand("O#", szResp, 'O', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("O#", sResp, 'O');
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::openShutter] ERROR = %d\n", timestamp, nErr);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [openShutter] ERROR = " << nErr << std::endl;
+        m_sLogFile.flush();
 #endif
     }
-    if(szResp[0] == 'L') { // batteryb LOW.. can't open
+
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::openShutter] Voltage too low to open\n", timestamp);
-        fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [openShutter] response = " << sResp << std::endl;
+    m_sLogFile.flush();
 #endif
-        nErr = PLUGIN_COMMAND_FAILED; // MAKE_ERR_CODE(PLUGIN_ID, DriverRootInterface::DT_DOME, ERR_CMDFAILED);
+
+    if(sResp.size() && sResp.at(0) == 'L') { // battery LOW.. can't open
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [openShutter] Voltage too low to open" << std::endl;
+        m_sLogFile.flush();
+#endif
+        nErr = MAKE_ERR_CODE(PLUGIN_ID, DOME, ERR_BATTERY_LOW);
     }
+    if(sResp.size() && sResp.at(0) == 'R') { // Raining. can't open
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [openShutter] Voltage too low to open" << std::endl;
+        m_sLogFile.flush();
+#endif
+        nErr = MAKE_ERR_CODE(PLUGIN_ID, DOME, ERR_RAINING);
+    }
+
     return nErr;
 }
 
@@ -1091,7 +1048,7 @@ int CRTIDome::closeShutter()
 {
     int nErr = PLUGIN_OK;
     bool bDummy;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
     double domeVolts;
     double dDomeCutOff;
     double dShutterVolts;
@@ -1105,50 +1062,41 @@ int CRTIDome::closeShutter()
 
     getShutterPresent(bDummy);
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::closeShutter] m_bShutterPresent = %s\n", timestamp, m_bShutterPresent?"Yes":"No");
-    fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [closeShutter] m_bShutterPresent = " << (m_bShutterPresent?"Yes":"No") << std::endl;
+    m_sLogFile.flush();
 #endif
 
     if(!m_bShutterPresent) {
         return PLUGIN_OK;
     }
+
     getBatteryLevels(domeVolts, dDomeCutOff, dShutterVolts, dShutterCutOff);
 
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::closeShutter] Closing shutter\n", timestamp);
-    fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [closeShutter] Closing shutter" << std::endl;
+    m_sLogFile.flush();
 #endif
 
-
-    nErr = domeCommand("C#", szResp, 'C', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("C#", sResp, 'C');
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::openShutter] closeShutter = %d\n", timestamp, nErr);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [closeShutter] ERROR Closing shutter : " << nErr << std::endl;
+        m_sLogFile.flush();
 #endif
     }
 
-    if(szResp[0] == 'L') { // batteryb LOW.. can't open
-        nErr = PLUGIN_COMMAND_FAILED; // MAKE_ERR_CODE(PLUGIN_ID, DriverRootInterface::DT_DOME, ERR_CMDFAILED);
+    if(sResp.size() && sResp.at(0) == 'L') { // batteryb LOW.. can't close :(
+        nErr = MAKE_ERR_CODE(PLUGIN_ID, DOME, ERR_BATTERY_LOW);
     }
 
     return nErr;
 }
 
-int CRTIDome::getFirmwareVersion(char *szVersion, int nStrMaxLen)
+int CRTIDome::getFirmwareVersion(std::string &sVersion, float &fVersion)
 {
     int nErr = PLUGIN_OK;
     int i;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
     std::vector<std::string> firmwareFields;
     std::vector<std::string> versionFields;
     std::string strVersion;
@@ -1159,37 +1107,59 @@ int CRTIDome::getFirmwareVersion(char *szVersion, int nStrMaxLen)
     if(m_bCalibrating)
         return PLUGIN_OK;
 
-    nErr = domeCommand("v#", szResp, 'v', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("v#", sResp, 'v');
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::getFirmwareVersion] ERROR = %s\n", timestamp, szResp);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getFirmwareVersion] ERROR = " << sResp << std::endl;
+        m_sLogFile.flush();
 #endif
-        return PLUGIN_COMMAND_FAILED; // MAKE_ERR_CODE(PLUGIN_ID, DriverRootInterface::DT_DOME, ERR_CMDFAILED);
+        return MAKE_ERR_CODE(PLUGIN_ID, DOME, PLUGIN_COMMAND_FAILED);
     }
 
-    nErr = parseFields(szResp,firmwareFields, 'v');
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getFirmwareVersion] response = " << sResp << std::endl;
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getFirmwareVersion] response len = " << sResp.size() << std::endl;
+    m_sLogFile.flush();
+#endif
+
+    nErr = parseFields(sResp,firmwareFields, 'v');
     if(nErr) {
-        strncpy(szVersion, szResp, nStrMaxLen);
-        m_fVersion = atof(szResp);
+        sVersion = "N/A";
+        fVersion = 0.0;
         return PLUGIN_OK;
     }
-
-    nErr = parseFields(firmwareFields[0].c_str(),versionFields, '.');
-    if(versionFields.size()>1) {
-        strVersion=versionFields[0]+".";
-        for(i=1; i<versionFields.size(); i++) {
-            strVersion+=versionFields[i];
-        }
-        strncpy(szVersion, szResp, nStrMaxLen);
-        m_fVersion = atof(strVersion.c_str());
+    if(!firmwareFields.size()) {
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getFirmwareVersion] firmwareFields is empty" << std::endl;
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getFirmwareVersion] response len = " << sResp.size() << std::endl;
+        m_sLogFile.flush();
+#endif
+        return MAKE_ERR_CODE(PLUGIN_ID, DOME, PLUGIN_COMMAND_FAILED);
     }
-    else {
-        strncpy(szVersion, szResp, nStrMaxLen);
-        m_fVersion = atof(szResp);
+
+    if(firmwareFields.size()>0) {
+        nErr = parseFields(firmwareFields[0],versionFields, '.');
+        if(versionFields.size()>1) {
+            strVersion=versionFields[0]+".";
+            for(i=1; i<versionFields.size(); i++) {
+                strVersion+=versionFields[i];
+            }
+            sVersion.assign(sResp);
+            try {
+                fVersion = std::stof(strVersion);
+            }
+            catch(const std::exception& e) {
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+                m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getFirmwareVersion] conversion exception = " << e.what() << std::endl;
+                m_sLogFile.flush();
+#endif
+                fVersion = 0;
+            }
+        }
+        else {
+            sVersion.assign(sResp);
+            fVersion = 0.0;
+        }
     }
     return nErr;
 }
@@ -1199,7 +1169,7 @@ int CRTIDome::getFirmwareVersion(float &fVersion)
     int nErr = PLUGIN_OK;
 
     if(m_fVersion == 0.0f) {
-        nErr = getFirmwareVersion(m_szFirmwareVersion, SERIAL_BUFFER_SIZE);
+        nErr = getFirmwareVersion(m_sFirmwareVersion, m_fVersion);
         if(nErr)
             return nErr;
     }
@@ -1209,10 +1179,10 @@ int CRTIDome::getFirmwareVersion(float &fVersion)
     return nErr;
 }
 
-int CRTIDome::getShutterFirmwareVersion(char *szVersion, int nStrMaxLen)
+int CRTIDome::getShutterFirmwareVersion(std::string &sVersion, float &fVersion)
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
     std::vector<std::string> firmwareFields;
     std::vector<std::string> versionFields;
     std::string strVersion;
@@ -1223,34 +1193,46 @@ int CRTIDome::getShutterFirmwareVersion(char *szVersion, int nStrMaxLen)
     if(m_bCalibrating)
         return PLUGIN_OK;
 
-    nErr = domeCommand("V#", szResp, 'V', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("V#", sResp, 'V');
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::getShutterFirmwareVersion] ERROR = %s\n", timestamp, szResp);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getShutterFirmwareVersion] ERROR = " << sResp << std::endl;
+        m_sLogFile.flush();
 #endif
         return nErr;
     }
 
-    nErr = parseFields(szResp,firmwareFields, 'V');
+    nErr = parseFields(sResp,firmwareFields, 'V');
     if(nErr) {
-        strncpy(szVersion, szResp, nStrMaxLen);
-        m_fVersion = atof(szResp);
+        sVersion = "N/A";
+        fVersion = 0.0;
         return PLUGIN_OK;
     }
 
-    strncpy(szVersion, szResp, nStrMaxLen);
-    m_fVersion = atof(szResp);
+    if(firmwareFields.size()>0) {
+        try {
+            sVersion.assign(firmwareFields[0]);
+            fVersion = std::stof(firmwareFields[0]);
+        }
+        catch(const std::exception& e) {
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+            m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getShutterFirmwareVersion] conversion exception = " << e.what() << std::endl;
+            m_sLogFile.flush();
+#endif
+            fVersion = 0;
+        }
+    }
+    else {
+        sVersion = "N/A";
+        fVersion = 0.0;
+    }
     return nErr;
 }
 
 int CRTIDome::goHome()
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
@@ -1262,22 +1244,16 @@ int CRTIDome::goHome()
             return PLUGIN_OK;
     }
 #ifdef PLUGIN_DEBUG
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] CRTIDome::goHome \n", timestamp);
-    fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [goHome]" << std::endl;
+    m_sLogFile.flush();
 #endif
 
     m_nHomingTries = 0;
-    nErr = domeCommand("h#", szResp, 'h', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("h#", sResp, 'h');
     if(nErr) {
 #ifdef PLUGIN_DEBUG
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] CRTIDome::goHome ERROR = %d\n", timestamp, nErr);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [goHome] ERROR = " << nErr << std::endl;
+        m_sLogFile.flush();
 #endif
         return nErr;
     }
@@ -1288,20 +1264,17 @@ int CRTIDome::goHome()
 int CRTIDome::calibrate()
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
 
-    nErr = domeCommand("c#", szResp, 'c', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("c#", sResp, 'c');
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::calibrate] ERROR = %d\n", timestamp, nErr);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [calibrate] ERROR = " << nErr << std::endl;
+        m_sLogFile.flush();
 #endif
         return nErr;
     }
@@ -1318,43 +1291,34 @@ int CRTIDome::isGoToComplete(bool &bComplete)
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
+    bComplete = false;
     if(isDomeMoving()) {
-        bComplete = false;
-        getDomeAz(dDomeAz);
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isGoToComplete] Dome is still moving" << std::endl;
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isGoToComplete] bComplete = " << (bComplete?"True":"False") << std::endl;
+        m_sLogFile.flush();
+#endif
         return nErr;
     }
 
     getDomeAz(dDomeAz);
-    if(dDomeAz >0 && dDomeAz<1)
-        dDomeAz = 0;
-
-    while(ceil(m_dGotoAz) >= 360)
-          m_dGotoAz = ceil(m_dGotoAz) - 360;
-
-    while(ceil(dDomeAz) >= 360)
-        dDomeAz = ceil(dDomeAz) - 360;
 
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] CRTIDome::isGoToComplete DomeAz = %3.2f\n", timestamp, dDomeAz);
-    fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isGoToComplete] DomeAz = " << std::fixed << std::setprecision(2) << dDomeAz << std::endl;
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isGoToComplete] m_dGotoAz = " << std::fixed << std::setprecision(2) << m_dGotoAz << std::endl;
+    m_sLogFile.flush();
 #endif
 
-    // we need to test "large" depending on the heading error , this is new in firmware 1.10 and up
-    if ((ceil(m_dGotoAz) <= ceil(dDomeAz)+3) && (ceil(m_dGotoAz) >= ceil(dDomeAz)-3)) {
+    if(checkBoundaries(m_dGotoAz, dDomeAz)) {
         bComplete = true;
         m_nGotoTries = 0;
     }
     else {
         // we're not moving and we're not at the final destination !!!
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] CRTIDome::isGoToComplete ***** ERROR **** domeAz = %3.2f, m_dGotoAz = %3.2f\n", timestamp, dDomeAz, m_dGotoAz);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isGoToComplete] ***** ERROR **** domeAz = " << std::fixed << std::setprecision(2) << dDomeAz << ", m_dGotoAz =" << std::fixed << std::setprecision(2) << m_dGotoAz << std::endl;
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isGoToComplete] m_dGotoAz = " << std::fixed << std::setprecision(2) << m_dGotoAz << std::endl;
+        m_sLogFile.flush();
 #endif
         if(m_nGotoTries == 0) {
             bComplete = false;
@@ -1362,13 +1326,55 @@ int CRTIDome::isGoToComplete(bool &bComplete)
             gotoAzimuth(m_dGotoAz);
         }
         else {
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+            m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isGoToComplete] After retry ***** ERROR **** domeAz = " << std::fixed << std::setprecision(2) << dDomeAz << ", m_dGotoAz =" << std::fixed << std::setprecision(2) << m_dGotoAz << std::endl;
+            m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isGoToComplete] After retry m_dGotoAz = " << std::fixed << std::setprecision(2) << m_dGotoAz << std::endl;
+            m_sLogFile.flush();
+#endif
             m_nGotoTries = 0;
-            nErr = PLUGIN_COMMAND_FAILED; // MAKE_ERR_CODE(PLUGIN_ID, DriverRootInterface::DT_DOME, ERR_CMDFAILED);
+            nErr = PLUGIN_COMMAND_FAILED;
         }
     }
 
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isGoToComplete] bComplete = " << (bComplete?"True":"False") << std::endl;
+    m_sLogFile.flush();
+#endif
+
     return nErr;
 }
+
+
+bool CRTIDome::checkBoundaries(double dTargetAz, double dDomeAz, double nMargin)
+{
+    double highMark;
+    double lowMark;
+    double roundedGotoAz;
+
+    // we need to test "large" depending on the heading error and movement coasting
+    highMark = ceil(dDomeAz)+nMargin;
+    lowMark = ceil(dDomeAz)-nMargin;
+    roundedGotoAz = ceil(dTargetAz);
+
+    if(lowMark < 0 && highMark > 0) { // we're close to 0 degre but above 0
+        if((roundedGotoAz+2) >= 360)
+            roundedGotoAz = (roundedGotoAz+2)-360;
+        if ( (roundedGotoAz > lowMark) && (roundedGotoAz <= highMark)) {
+            return true;
+        }
+    }
+    if ( lowMark > 0 && highMark>360 ) { // we're close to 0 but from the other side
+        if( (roundedGotoAz+360) > lowMark && (roundedGotoAz+360) <= highMark) {
+            return true;
+        }
+    }
+    if (roundedGotoAz > lowMark && roundedGotoAz <= highMark) {
+        return true;
+    }
+
+    return false;
+}
+
 
 int CRTIDome::isOpenComplete(bool &bComplete)
 {
@@ -1385,7 +1391,7 @@ int CRTIDome::isOpenComplete(bool &bComplete)
 
     nErr = getShutterState(m_nShutterState);
     if(nErr)
-        return PLUGIN_COMMAND_FAILED; // MAKE_ERR_CODE(PLUGIN_ID, DriverRootInterface::DT_DOME, ERR_CMDFAILED);
+        return MAKE_ERR_CODE(PLUGIN_ID, DOME, PLUGIN_COMMAND_FAILED);
     if(m_nShutterState == OPEN){
         m_bShutterOpened = true;
         bComplete = true;
@@ -1398,11 +1404,8 @@ int CRTIDome::isOpenComplete(bool &bComplete)
     }
 
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::isOpenComplete] bComplete = %s\n", timestamp, bComplete?"True":"False");
-    fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isOpenComplete] bComplete = " << (bComplete?"True":"False") << std::endl;
+    m_sLogFile.flush();
 #endif
 
     return nErr;
@@ -1418,13 +1421,13 @@ int CRTIDome::isCloseComplete(bool &bComplete)
 
     getShutterPresent(bDummy);
     if(!m_bShutterPresent) {
-        bComplete = true;
+        bComplete = false;  //open by default
         return PLUGIN_OK;
     }
 
     nErr = getShutterState(m_nShutterState);
     if(nErr)
-        return PLUGIN_COMMAND_FAILED; // MAKE_ERR_CODE(PLUGIN_ID, DriverRootInterface::DT_DOME, ERR_CMDFAILED);
+        return MAKE_ERR_CODE(PLUGIN_ID, DOME, PLUGIN_COMMAND_FAILED);
     if(m_nShutterState == CLOSED){
         m_bShutterOpened = false;
         bComplete = true;
@@ -1437,11 +1440,8 @@ int CRTIDome::isCloseComplete(bool &bComplete)
     }
 
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::isCloseComplete] bComplete = %s\n", timestamp, bComplete?"True":"False");
-    fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isCloseComplete] bComplete = " << (bComplete?"True":"False") << std::endl;
+    m_sLogFile.flush();
 #endif
 
     return nErr;
@@ -1457,12 +1457,9 @@ int CRTIDome::isParkComplete(bool &bComplete)
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::isParkComplete] m_bParking = %s\n", timestamp, m_bParking?"True":"False");
-    fprintf(Logfile, "[%s] [CRTIDome::isParkComplete] bComplete = %s\n", timestamp, bComplete?"True":"False");
-    fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isParkComplete] m_bParking = " << (m_bParking?"True":"False") << std::endl;
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isParkComplete] bComplete = " << (bComplete?"True":"False") << std::endl;
+    m_sLogFile.flush();
 #endif
 
     if(isDomeMoving()) {
@@ -1476,11 +1473,8 @@ int CRTIDome::isParkComplete(bool &bComplete)
         nErr = isFindHomeComplete(bFoundHome);
         if(bFoundHome) { // we're home, now park
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-            ltime = time(NULL);
-            timestamp = asctime(localtime(&ltime));
-            timestamp[strlen(timestamp) - 1] = 0;
-            fprintf(Logfile, "[%s] [CRTIDome::isParkComplete] found home, now parking\n", timestamp);
-            fflush(Logfile);
+            m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isParkComplete] found home, now parking" << std::endl;
+            m_sLogFile.flush();
 #endif
             m_bParking = false;
             nErr = gotoAzimuth(m_dParkAz);
@@ -1490,8 +1484,7 @@ int CRTIDome::isParkComplete(bool &bComplete)
 
     getDomeAz(dDomeAz);
 
-    // we need to test "large" depending on the heading error
-    if ((ceil(m_dParkAz) <= ceil(dDomeAz)+3) && (ceil(m_dParkAz) >= ceil(dDomeAz)-3)) {
+    if(checkBoundaries(m_dParkAz, dDomeAz)) {
         m_bParked = true;
         bComplete = true;
     }
@@ -1499,15 +1492,12 @@ int CRTIDome::isParkComplete(bool &bComplete)
         // we're not moving and we're not at the final destination !!!
         bComplete = false;
         m_bParked = false;
-        nErr = PLUGIN_COMMAND_FAILED; // MAKE_ERR_CODE(PLUGIN_ID, DriverRootInterface::DT_DOME, ERR_CMDFAILED);
+        nErr = MAKE_ERR_CODE(PLUGIN_ID, DOME, PLUGIN_COMMAND_FAILED);
     }
 
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::isParkComplete] bComplete = %s\n", timestamp, bComplete?"True":"False");
-    fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isParkComplete] bComplete = " << (bComplete?"True":"False") << std::endl;
+    m_sLogFile.flush();
 #endif
 
     return nErr;
@@ -1525,20 +1515,14 @@ int CRTIDome::isUnparkComplete(bool &bComplete)
     if(!m_bParked) {
         bComplete = true;
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::isUnparkComplete] UNPARKED \n", timestamp);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isUnparkComplete] UNPARKED" << std::endl;
+        m_sLogFile.flush();
 #endif
     }
     else if (m_bUnParking) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::isUnparkComplete] unparking.. checking if we're home \n", timestamp);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isUnparkComplete] unparking.. checking if we're home" << std::endl;
+        m_sLogFile.flush();
 #endif
         nErr = isFindHomeComplete(bComplete);
         if(nErr)
@@ -1552,12 +1536,9 @@ int CRTIDome::isUnparkComplete(bool &bComplete)
     }
 
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::isUnparkComplete] m_bParked = %s\n", timestamp, m_bParked?"True":"False");
-    fprintf(Logfile, "[%s] [CRTIDome::isUnparkComplete] bComplete = %s\n", timestamp, bComplete?"True":"False");
-    fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isUnparkComplete] m_bParked = " << (m_bParked?"True":"False") << std::endl;
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isUnparkComplete] bComplete = " << (bComplete?"True":"False") << std::endl;
+    m_sLogFile.flush();
 #endif
 
     return nErr;
@@ -1571,24 +1552,17 @@ int CRTIDome::isFindHomeComplete(bool &bComplete)
         return PLUGIN_NOT_CONNECTED;
 
 #ifdef PLUGIN_DEBUG
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::isFindHomeComplete]\n", timestamp);
-    fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isFindHomeComplete]" << std::endl;
+    m_sLogFile.flush();
 #endif
 
     if(isDomeMoving()) {
         bComplete = false;
 #ifdef PLUGIN_DEBUG
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] CRTIDome::isFindHomeComplete still moving\n", timestamp);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isFindHomeComplete] still moving" << std::endl;
+        m_sLogFile.flush();
 #endif
         return nErr;
-
     }
 
     if(isDomeAtHome()){
@@ -1598,21 +1572,15 @@ int CRTIDome::isFindHomeComplete(bool &bComplete)
         syncDome(m_dHomeAz, m_dCurrentElPosition);
         m_nHomingTries = 0;
 #ifdef PLUGIN_DEBUG
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::isFindHomeComplete] At Home\n", timestamp);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isFindHomeComplete] At Home" << std::endl;
+        m_sLogFile.flush();
 #endif
     }
     else {
         // we're not moving and we're not at the home position !!!
 #ifdef PLUGIN_DEBUG
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::isFindHomeComplete] Not moving and not at home !!!\n", timestamp);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isFindHomeComplete] Not moving and not at home !!!" << std::endl;
+        m_sLogFile.flush();
 #endif
         bComplete = false;
         m_bParked = false;
@@ -1624,7 +1592,7 @@ int CRTIDome::isFindHomeComplete(bool &bComplete)
         }
         else {
             m_nHomingTries = 0;
-            nErr = PLUGIN_COMMAND_FAILED; // MAKE_ERR_CODE(PLUGIN_ID, DriverRootInterface::DT_DOME, ERR_CMDFAILED);
+            nErr = MAKE_ERR_CODE(PLUGIN_ID, DOME, PLUGIN_COMMAND_FAILED);
         }
     }
 
@@ -1659,13 +1627,10 @@ int CRTIDome::isCalibratingComplete(bool &bComplete)
     bComplete = true;
     m_bCalibrating = false;
 #ifdef PLUGIN_DEBUG
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::getNbTicksPerRev] final m_nNbStepPerRev = %d\n", timestamp, m_nNbStepPerRev);
-    fprintf(Logfile, "[%s] [CRTIDome::getNbTicksPerRev] final m_bCalibrating = %s\n", timestamp, m_bCalibrating?"True":"False");
-    fprintf(Logfile, "[%s] [CRTIDome::getNbTicksPerRev] final bComplete = %s\n", timestamp, bComplete?"True":"False");
-    fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isCalibratingComplete] m_nNbStepPerRev = " << m_nNbStepPerRev << std::endl;
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isCalibratingComplete] m_bCalibrating = " << (m_bCalibrating?"True":"False") << std::endl;
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [isCalibratingComplete] bComplete = " << (bComplete?"True":"False") << std::endl;
+    m_sLogFile.flush();
 #endif
     return nErr;
 }
@@ -1674,7 +1639,7 @@ int CRTIDome::isCalibratingComplete(bool &bComplete)
 int CRTIDome::abortCurrentCommand()
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
@@ -1686,7 +1651,7 @@ int CRTIDome::abortCurrentCommand()
     m_nGotoTries = 1;   // prevents the goto retry
     m_nHomingTries = 1; // prevents the find home retry
 
-    nErr = domeCommand("a#", szResp, 'a', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("a#", sResp, 'a');
 
     getDomeAz(m_dGotoAz);
 
@@ -1696,70 +1661,50 @@ int CRTIDome::abortCurrentCommand()
 int CRTIDome::sendShutterHello()
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    if(!m_bShutterPresent) {
-        return PLUGIN_OK;
-    }
-
-
-	if(m_fVersion>=2.0f)
-        nErr = domeCommand("H#", szResp, 'H', SERIAL_BUFFER_SIZE);
-    else
-        nErr = domeCommand("H#", NULL, 0, SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("H#", sResp, 'H'); // we don't want the response
     return nErr;
 }
 
 int CRTIDome::getShutterPresent(bool &bShutterPresent)
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
-    nErr = domeCommand("o#", szResp, 'o', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("o#", sResp, 'o');
     if(nErr) {
         return nErr;
     }
-
-    m_bShutterPresent = (szResp[0]=='1') ? true : false;
+    m_bShutterPresent = false;
+    if(sResp.size())
+        m_bShutterPresent = (sResp.at(0)=='1') ? true : false;
 #ifdef PLUGIN_DEBUG
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::getShutterPresent] szResp =  %s\n", timestamp, szResp);
-    fprintf(Logfile, "[%s] [CRTIDome::getShutterPresent] m_bShutterPresent =  %s\n", timestamp, m_bShutterPresent?"Yes":"No");
-    fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getShutterPresent] sResp = " << sResp << std::endl;
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getShutterPresent] m_bShutterPresent = " << (m_bShutterPresent?"True":"False") << std::endl;
+    m_sLogFile.flush();
 #endif
 
-
     bShutterPresent = m_bShutterPresent;
-    return nErr;
+    if(m_bShutterPresent && m_sShutterFirmwareVersion.size() == 0)
+        getShutterFirmwareVersion(m_sShutterFirmwareVersion, m_fShutterVersion);
 
+    return nErr;
 }
 
 #pragma mark - Getter / Setter
 
 int CRTIDome::getNbTicksPerRev()
 {
-#ifdef PLUGIN_DEBUG
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::getNbTicksPerRev] m_bIsConnected = %s\n", timestamp, m_bIsConnected?"True":"False");
-    fflush(Logfile);
-#endif
-
     if(m_bIsConnected)
         getDomeStepPerRev(m_nNbStepPerRev);
 
 #ifdef PLUGIN_DEBUG
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::getNbTicksPerRev] m_nNbStepPerRev = %d\n", timestamp, m_nNbStepPerRev);
-    fflush(Logfile);
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getNbTicksPerRev] m_nNbStepPerRev = " << m_nNbStepPerRev << std::endl;
+    m_sLogFile.flush();
 #endif
 
     return m_nNbStepPerRev;
@@ -1784,16 +1729,15 @@ double CRTIDome::getHomeAz()
 int CRTIDome::setHomeAz(double dAz)
 {
     int nErr = PLUGIN_OK;
-    char szBuf[SERIAL_BUFFER_SIZE];
-    char szResp[SERIAL_BUFFER_SIZE];
-
+    std::string sResp;
+    std::stringstream ssTmp;
     m_dHomeAz = dAz;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    snprintf(szBuf, SERIAL_BUFFER_SIZE, "i%3.2f#", dAz);
-    nErr = domeCommand(szBuf, szResp, 'i', SERIAL_BUFFER_SIZE);
+    ssTmp << "i" << std::fixed << std::setprecision(2) << dAz << "#";
+    nErr = domeCommand(ssTmp.str(), sResp, 'i');
     return nErr;
 }
 
@@ -1810,16 +1754,16 @@ double CRTIDome::getParkAz()
 int CRTIDome::setParkAz(double dAz)
 {
     int nErr = PLUGIN_OK;
-    char szBuf[SERIAL_BUFFER_SIZE];
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
+    std::stringstream ssTmp;
 
     m_dParkAz = dAz;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    snprintf(szBuf, SERIAL_BUFFER_SIZE, "l%3.2f#", dAz);
-    nErr = domeCommand(szBuf, szResp, 'l', SERIAL_BUFFER_SIZE);
+    ssTmp << "l" << std::fixed << std::setprecision(2) << dAz << "#";
+    nErr = domeCommand(ssTmp.str(), sResp, 'l');
     return nErr;
 }
 
@@ -1841,35 +1785,32 @@ double CRTIDome::getCurrentEl()
     return m_dCurrentElPosition;
 }
 
-int CRTIDome::getCurrentShutterState()
-{
-    if(m_bIsConnected)
-        getShutterState(m_nShutterState);
-
-    return m_nShutterState;
-}
-
 
 int CRTIDome::getDefaultDir(bool &bNormal)
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
     bNormal = true;
-    nErr = domeCommand("y#", szResp, 'y', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("y#", sResp, 'y');
     if(nErr) {
         return nErr;
     }
-
-    bNormal = atoi(szResp) ? false:true;
-#ifdef PLUGIN_DEBUG
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::getDefaultDir] bNormal =  %s\n", timestamp, bNormal?"True":"False");
-    fflush(Logfile);
+    try {
+        bNormal = std::stoi(sResp) ? false:true;
+    }
+    catch(const std::exception& e) {
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getDefaultDir] conversion exception = " << e.what() << std::endl;
+        m_sLogFile.flush();
 #endif
+        bNormal = true;
+    }
 
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getDefaultDir] bNormal = " << (bNormal?"True":"False") << std::endl;
+    m_sLogFile.flush();
+#endif
 
     return nErr;
 }
@@ -1877,24 +1818,21 @@ int CRTIDome::getDefaultDir(bool &bNormal)
 int CRTIDome::setDefaultDir(bool bNormal)
 {
     int nErr = PLUGIN_OK;
-    char szBuf[SERIAL_BUFFER_SIZE];
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
+    std::stringstream ssTmp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    snprintf(szBuf, SERIAL_BUFFER_SIZE, "y %1d#", bNormal?0:1);
+    ssTmp << "y" << (bNormal?"0":"1") << "#";
 
-#ifdef PLUGIN_DEBUG
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::setDefaultDir] bNormal =  %s\n", timestamp, bNormal?"True":"False");
-    fprintf(Logfile, "[%s] [CRTIDome::setDefaultDir] szBuf =  %s\n", timestamp, szBuf);
-    fflush(Logfile);
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [setDefaultDir] bNormal = " << (bNormal?"True":"False") << std::endl;
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [setDefaultDir] ssTmp = " << ssTmp.str() << std::endl;
+    m_sLogFile.flush();
 #endif
 
-    nErr = domeCommand(szBuf, szResp, 'y', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand(ssTmp.str(), sResp, 'y');
     return nErr;
 
 }
@@ -1902,23 +1840,29 @@ int CRTIDome::setDefaultDir(bool bNormal)
 int CRTIDome::getRainSensorStatus(int &nStatus)
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
     nStatus = NOT_RAINING;
-    nErr = domeCommand("F#", szResp, 'F', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("F#", sResp, 'F');
     if(nErr) {
         return nErr;
     }
 
-    nStatus = atoi(szResp) ? false:true;
-#ifdef PLUGIN_DEBUG
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::getRainSensorStatus] nStatus =  %s\n", timestamp, nStatus?"NOT RAINING":"RAINING");
-    fflush(Logfile);
+    try {
+        nStatus = std::stoi(sResp) ? false:true;
+    }
+    catch(const std::exception& e) {
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getRainSensorStatus] conversion exception = " << e.what() << std::endl;
+        m_sLogFile.flush();
 #endif
+        nStatus = false;
+    }
 
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getRainSensorStatus] nStatus = " << (nStatus?"NOT RAINING":"RAINING") << std::endl;
+    m_sLogFile.flush();
+#endif
 
     m_nIsRaining = nStatus;
     return nErr;
@@ -1927,23 +1871,30 @@ int CRTIDome::getRainSensorStatus(int &nStatus)
 int CRTIDome::getRotationSpeed(int &nSpeed)
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    nErr = domeCommand("r#", szResp, 'r', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("r#", sResp, 'r');
     if(nErr) {
         return nErr;
     }
 
-    nSpeed = atoi(szResp);
-#ifdef PLUGIN_DEBUG
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::getRotationSpeed] nSpeed =  %d\n", timestamp, nSpeed);
-    fflush(Logfile);
+    try{
+        nSpeed = std::stoi(sResp);
+    }
+    catch(const std::exception& e) {
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getRotationSpeed] conversion exception = " << e.what() << std::endl;
+        m_sLogFile.flush();
+#endif
+        nSpeed = 0;
+    }
+
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getRotationSpeed] nSpeed = " << nSpeed << std::endl;
+    m_sLogFile.flush();
 #endif
 
     return nErr;
@@ -1952,14 +1903,14 @@ int CRTIDome::getRotationSpeed(int &nSpeed)
 int CRTIDome::setRotationSpeed(int nSpeed)
 {
     int nErr = PLUGIN_OK;
-    char szBuf[SERIAL_BUFFER_SIZE];
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::stringstream ssTmp;
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    snprintf(szBuf, SERIAL_BUFFER_SIZE, "r%d#", nSpeed);
-    nErr = domeCommand(szBuf, szResp, 'r', SERIAL_BUFFER_SIZE);
+    ssTmp << "r" << nSpeed << "#";
+    nErr = domeCommand(ssTmp.str(), sResp, 'r');
     return nErr;
 }
 
@@ -1967,23 +1918,29 @@ int CRTIDome::setRotationSpeed(int nSpeed)
 int CRTIDome::getRotationAcceleration(int &nAcceleration)
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    nErr = domeCommand("e#", szResp, 'e', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("e#", sResp, 'e');
     if(nErr) {
         return nErr;
     }
 
-    nAcceleration = atoi(szResp);
-#ifdef PLUGIN_DEBUG
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::getRotationAcceleration] nAcceleration =  %d\n", timestamp, nAcceleration);
-    fflush(Logfile);
+    try {
+        nAcceleration = std::stoi(sResp);
+    }
+    catch(const std::exception& e) {
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getRotationAcceleration] conversion exception = " << e.what() << std::endl;
+        m_sLogFile.flush();
+#endif
+        nAcceleration = 0;
+    }
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getRotationAcceleration] nAcceleration = " << nAcceleration << std::endl;
+    m_sLogFile.flush();
 #endif
 
     return nErr;
@@ -1992,14 +1949,14 @@ int CRTIDome::getRotationAcceleration(int &nAcceleration)
 int CRTIDome::setRotationAcceleration(int nAcceleration)
 {
     int nErr = PLUGIN_OK;
-    char szBuf[SERIAL_BUFFER_SIZE];
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::stringstream ssTmp;
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    snprintf(szBuf, SERIAL_BUFFER_SIZE, "e%d#", nAcceleration);
-    nErr = domeCommand(szBuf, szResp, 'e', SERIAL_BUFFER_SIZE);
+    ssTmp << "e" << nAcceleration << "#";
+    nErr = domeCommand(ssTmp.str(), sResp, 'e');
 
     return nErr;
 }
@@ -2007,7 +1964,7 @@ int CRTIDome::setRotationAcceleration(int nAcceleration)
 int CRTIDome::getShutterSpeed(int &nSpeed)
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
@@ -2017,19 +1974,24 @@ int CRTIDome::getShutterSpeed(int &nSpeed)
         return PLUGIN_OK;
     }
 
-
-    nErr = domeCommand("R#", szResp, 'R', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("R#", sResp, 'R');
     if(nErr) {
         return nErr;
     }
 
-    nSpeed = atoi(szResp);
-#ifdef PLUGIN_DEBUG
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::getShutterSpeed] nSpeed =  %d\n", timestamp, nSpeed);
-    fflush(Logfile);
+    try {
+        nSpeed = std::stoi(sResp);
+    }
+    catch(const std::exception& e) {
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getShutterSpeed] conversion exception = " << e.what() << std::endl;
+        m_sLogFile.flush();
+#endif
+        nSpeed = 0;
+    }
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getShutterSpeed] nSpeed = " << nSpeed << std::endl;
+    m_sLogFile.flush();
 #endif
 
     return nErr;
@@ -2038,8 +2000,8 @@ int CRTIDome::getShutterSpeed(int &nSpeed)
 int CRTIDome::setShutterSpeed(int nSpeed)
 {
     int nErr = PLUGIN_OK;
-    char szBuf[SERIAL_BUFFER_SIZE];
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::stringstream ssTmp;
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
@@ -2048,9 +2010,8 @@ int CRTIDome::setShutterSpeed(int nSpeed)
         return PLUGIN_OK;
     }
 
-
-    snprintf(szBuf, SERIAL_BUFFER_SIZE, "R%d#", nSpeed);
-    nErr = domeCommand(szBuf, szResp, 'R', SERIAL_BUFFER_SIZE);
+    ssTmp << "R" << nSpeed << "#";
+    nErr = domeCommand(ssTmp.str(), sResp, 'R');
 
     return nErr;
 }
@@ -2058,7 +2019,7 @@ int CRTIDome::setShutterSpeed(int nSpeed)
 int CRTIDome::getShutterAcceleration(int &nAcceleration)
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
@@ -2068,19 +2029,24 @@ int CRTIDome::getShutterAcceleration(int &nAcceleration)
         return PLUGIN_OK;
     }
 
-
-    nErr = domeCommand("E#", szResp, 'E', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("E#", sResp, 'E');
     if(nErr) {
         return nErr;
     }
 
-    nAcceleration = atoi(szResp);
-#ifdef PLUGIN_DEBUG
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::getShutterAcceleration] nAcceleration =  %d\n", timestamp, nAcceleration);
-    fflush(Logfile);
+    try {
+        nAcceleration = std::stoi(sResp);
+    }
+    catch(const std::exception& e) {
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getShutterAcceleration] conversion exception = " << e.what() << std::endl;
+        m_sLogFile.flush();
+#endif
+        nAcceleration = 0;
+    }
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getShutterAcceleration] nAcceleration = " << nAcceleration << std::endl;
+    m_sLogFile.flush();
 #endif
     return nErr;
 }
@@ -2088,8 +2054,8 @@ int CRTIDome::getShutterAcceleration(int &nAcceleration)
 int CRTIDome::setShutterAcceleration(int nAcceleration)
 {
     int nErr = PLUGIN_OK;
-    char szBuf[SERIAL_BUFFER_SIZE];
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::stringstream ssTmp;
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
@@ -2098,9 +2064,8 @@ int CRTIDome::setShutterAcceleration(int nAcceleration)
         return PLUGIN_OK;
     }
 
-
-    snprintf(szBuf, SERIAL_BUFFER_SIZE, "E%d#", nAcceleration);
-    nErr = domeCommand(szBuf, szResp, 'E', SERIAL_BUFFER_SIZE);
+    ssTmp << "E" << nAcceleration << "#";
+    nErr = domeCommand(ssTmp.str(), sResp, 'E');
     return nErr;
 }
 
@@ -2117,7 +2082,7 @@ void CRTIDome::setHomeOnUnpark(const bool bEnabled)
 int	CRTIDome::getSutterWatchdogTimerValue(int &nValue)
 {
 	int nErr = PLUGIN_OK;
-	char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
 	if(!m_bIsConnected)
 		return PLUGIN_NOT_CONNECTED;
@@ -2127,19 +2092,25 @@ int	CRTIDome::getSutterWatchdogTimerValue(int &nValue)
         return PLUGIN_OK;
     }
 
-
-	nErr = domeCommand("I#", szResp, 'I', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("I#", sResp, 'I');
 	if(nErr) {
 		return nErr;
 	}
 
-	nValue = atoi(szResp)/1000; // value is in ms
-#ifdef PLUGIN_DEBUG
-	ltime = time(NULL);
-	timestamp = asctime(localtime(&ltime));
-	timestamp[strlen(timestamp) - 1] = 0;
-	fprintf(Logfile, "[%s] [CRTIDome::getSutterWatchdogTimerValue] nValue =  %d\n", timestamp, nValue);
-	fflush(Logfile);
+    try {
+        nValue = std::stoi(sResp)/1000; // value is in ms
+    }
+    catch(const std::exception& e) {
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getSutterWatchdogTimerValue] conversion exception = " << e.what() << std::endl;
+        m_sLogFile.flush();
+#endif
+        nValue = 0;
+    }
+
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getSutterWatchdogTimerValue] nValue = " << nValue << std::endl;
+    m_sLogFile.flush();
 #endif
 	return nErr;
 }
@@ -2147,8 +2118,8 @@ int	CRTIDome::getSutterWatchdogTimerValue(int &nValue)
 int	CRTIDome::setSutterWatchdogTimerValue(const int &nValue)
 {
 	int nErr = PLUGIN_OK;
-	char szBuf[SERIAL_BUFFER_SIZE];
-	char szResp[SERIAL_BUFFER_SIZE];
+    std::stringstream ssTmp;
+    std::string sResp;
 
 	if(!m_bIsConnected)
 		return PLUGIN_NOT_CONNECTED;
@@ -2157,32 +2128,38 @@ int	CRTIDome::setSutterWatchdogTimerValue(const int &nValue)
         return PLUGIN_OK;
     }
 
-
-	snprintf(szBuf, SERIAL_BUFFER_SIZE, "I%d#", nValue * 1000); // value is in ms
-	nErr = domeCommand(szBuf, szResp, 'I', SERIAL_BUFFER_SIZE);
+    ssTmp << "I" << (nValue * 1000) << "#";
+    nErr = domeCommand(ssTmp.str(), sResp, 'I');
 	return nErr;
 }
 
 int CRTIDome::getRainAction(int &nAction)
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    nErr = domeCommand("n#", szResp, 'n', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("n#", sResp, 'n');
     if(nErr) {
         return nErr;
     }
 
-    nAction = atoi(szResp);
-#ifdef PLUGIN_DEBUG
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::getRainTimerValue] nValue =  %d\n", timestamp, nAction);
-    fflush(Logfile);
+    try {
+        nAction = std::stoi(sResp);
+    }
+    catch(const std::exception& e) {
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getRainAction] conversion exception = " << e.what() << std::endl;
+        m_sLogFile.flush();
+#endif
+        nAction = 0;
+    }
+
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getRainTimerValue] nAction = " << nAction << std::endl;
+    m_sLogFile.flush();
 #endif
     return nErr;
 
@@ -2191,14 +2168,14 @@ int CRTIDome::getRainAction(int &nAction)
 int CRTIDome::setRainAction(const int &nAction)
 {
     int nErr = PLUGIN_OK;
-    char szBuf[SERIAL_BUFFER_SIZE];
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::stringstream ssTmp;
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    snprintf(szBuf, SERIAL_BUFFER_SIZE, "n%d#", nAction);
-    nErr = domeCommand(szBuf, szResp, 'n', SERIAL_BUFFER_SIZE);
+    ssTmp << "n" << nAction << "#";
+    nErr = domeCommand(ssTmp.str(), sResp, 'n');
     return nErr;
 
 }
@@ -2206,23 +2183,30 @@ int CRTIDome::setRainAction(const int &nAction)
 int CRTIDome::getPanId(int &nPanId)
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    nErr = domeCommand("q#", szResp, 'q', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("q#", sResp, 'q');
     if(nErr) {
         return nErr;
     }
 
-    nPanId = int(strtol(szResp, NULL, 16));
-#ifdef PLUGIN_DEBUG
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::getPanId] nPanId =  %04X\n", timestamp, nPanId);
-    fflush(Logfile);
+    try {
+        nPanId = int(std::stol(sResp, NULL, 16));
+    }
+    catch(const std::exception& e) {
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getPanId] conversion exception = " << e.what() << std::endl;
+        m_sLogFile.flush();
+#endif
+        nPanId = 0;
+    }
+
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getPanId] nPanId = " << std::uppercase << std::setfill('0') << std::setw(4) << std::hex << nPanId << std::endl;
+    m_sLogFile.flush();
 #endif
 
     return nErr;
@@ -2232,14 +2216,14 @@ int CRTIDome::getPanId(int &nPanId)
 int CRTIDome::setPanId(const int nPanId)
 {
     int nErr = PLUGIN_OK;
-    char szBuf[SERIAL_BUFFER_SIZE];
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::stringstream ssTmp;
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    snprintf(szBuf, SERIAL_BUFFER_SIZE, "q%04X#", nPanId);
-    nErr = domeCommand(szBuf, szResp, 'q', SERIAL_BUFFER_SIZE);
+    ssTmp << "q" << std::uppercase << std::setfill('0') << std::setw(4) << std::hex << nPanId << "#";
+    nErr = domeCommand(ssTmp.str(), sResp, 'q');
     return nErr;
 
 }
@@ -2247,23 +2231,29 @@ int CRTIDome::setPanId(const int nPanId)
 int CRTIDome::getShutterPanId(int &nPanId)
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    nErr = domeCommand("Q#", szResp, 'Q', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("Q#", sResp, 'Q');
     if(nErr) {
         return nErr;
     }
 
-    nPanId = int(strtol(szResp, NULL, 16));
-#ifdef PLUGIN_DEBUG
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::getShutterPanId] nPanId =  %04X\n", timestamp, nPanId);
-    fflush(Logfile);
+    try {
+        nPanId = int(std::stol(sResp, NULL, 16));
+    }
+    catch(const std::exception& e) {
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getShutterPanId] conversion exception = " << e.what() << std::endl;
+        m_sLogFile.flush();
+#endif
+        nPanId = 0;
+    }
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getShutterPanId] nPanId = " << std::uppercase << std::setfill('0') << std::setw(4) << std::hex << nPanId << std::endl;
+    m_sLogFile.flush();
 #endif
 
     return nErr;
@@ -2288,19 +2278,16 @@ int CRTIDome::isPanIdSet(const int nPanId, bool &bSet)
 int CRTIDome::restoreDomeMotorSettings()
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    nErr = domeCommand("d#", szResp, 'd', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("d#", sResp, 'd');
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::restoreDomeMotorSettings] ERROR = %d\n", timestamp, nErr);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [restoreDomeMotorSettings] ERROR = " <<nErr << std::endl;
+        m_sLogFile.flush();
 #endif
     }
 
@@ -2310,20 +2297,17 @@ int CRTIDome::restoreDomeMotorSettings()
 int CRTIDome::restoreShutterMotorSettings()
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
     int nDummy;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    nErr = domeCommand("D#", szResp, 'D', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("D#", sResp, 'D');
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::restoreShutterMotorSettings] ERROR = %d\n", timestamp, nErr);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [restoreShutterMotorSettings] ERROR = " <<nErr << std::endl;
+        m_sLogFile.flush();
 #endif
     }
     nErr = getShutterAcceleration(nDummy);
@@ -2333,24 +2317,7 @@ int CRTIDome::restoreShutterMotorSettings()
 
 void CRTIDome::enableRainStatusFile(bool bEnable)
 {
-    if(bEnable) {
-        if(!RainStatusfile)
-            RainStatusfile = fopen(m_sRainStatusfilePath.c_str(), "w");
-        if(RainStatusfile) {
-            m_bSaveRainStatus = true;
-        }
-        else { // if we failed to open the file.. don't log ..
-            RainStatusfile = NULL;
-            m_bSaveRainStatus = false;
-        }
-    }
-    else {
-        if(RainStatusfile) {
-            fclose(RainStatusfile);
-            RainStatusfile = NULL;
-        }
-        m_bSaveRainStatus = false;
-    }
+    m_bSaveRainStatus = bEnable;
 }
 
 void CRTIDome::getRainStatusFileName(std::string &fName)
@@ -2362,76 +2329,75 @@ void CRTIDome::writeRainStatus()
 {
     int nStatus;
 
-#ifdef PLUGIN_DEBUG
-    ltime = time(NULL);
-    timestamp = asctime(localtime(&ltime));
-    timestamp[strlen(timestamp) - 1] = 0;
-    fprintf(Logfile, "[%s] [CRTIDome::writeRainStatus] m_nIsRaining =  %s\n", timestamp, m_nIsRaining==RAINING?"Raining":"Not Raining");
-    fprintf(Logfile, "[%s] [CRTIDome::writeRainStatus] m_bSaveRainStatus =  %s\n", timestamp, m_bSaveRainStatus?"YES":"NO");
-    fflush(Logfile);
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [writeRainStatus] m_nIsRaining = " <<(m_nIsRaining==RAINING?"Raining":"Not Raining") << std::endl;
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [writeRainStatus] m_bSaveRainStatus = " <<(m_bSaveRainStatus?"YES":"NO") << std::endl;
+    m_sLogFile.flush();
 #endif
 
-    if(m_bSaveRainStatus && RainStatusfile) {
+    if(m_bSaveRainStatus) {
         getRainSensorStatus(nStatus);
         if(m_nRainStatus != nStatus) {
             m_nRainStatus = nStatus;
-            RainStatusfile = freopen(m_sRainStatusfilePath.c_str(), "w", RainStatusfile);
-            fseek(RainStatusfile, 0, SEEK_SET);
-            fprintf(RainStatusfile, "Raining:%s", nStatus == RAINING?"YES":"NO");
-            fflush(RainStatusfile);
+            if(m_RainStatusfile.is_open())
+                m_RainStatusfile.close();
+            try {
+                m_RainStatusfile.open(m_sRainStatusfilePath, std::ios::out |std::ios::trunc);
+                if(m_RainStatusfile.is_open()) {
+                    m_RainStatusfile << "Raining:" << (nStatus == RAINING?"YES":"NO") << std::endl;
+                    m_RainStatusfile.close();
+                }
+            }
+            catch(const std::exception& e) {
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+                m_sLogFile << "["<<getTimeStamp()<<"]"<< " [writeRainStatus] Error writing file = " << e.what() << std::endl;
+                m_sLogFile.flush();
+#endif
+                if(m_RainStatusfile.is_open())
+                    m_RainStatusfile.close();
+            }
         }
     }
 }
 
-/*
- ETH_RECONFIG 'b'
- ETH_MAC_ADDRESS 'f'
- IP_ADDRESS 'j'
- IP_SUBNET 'p'
- IP_GATEWAY 'u'
- */
 
 int CRTIDome::getMACAddress(std::string &MACAddress)
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    nErr = domeCommand("f#", szResp, 'f', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("f#", sResp, 'f');
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::getMACAddress] ERROR = %d\n", timestamp, nErr);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getMACAddress] ERROR = " <<nErr << std::endl;
+        m_sLogFile.flush();
 #endif
     }
-    MACAddress.assign(szResp);
+    MACAddress.assign(sResp);
     return nErr;
 }
 
 int CRTIDome::reconfigureNetwork()
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    if(m_bNetworkConnected)
-        nErr = domeCommand("b#", szResp, 0x00, SERIAL_BUFFER_SIZE); // we won't get an answer as reconfiguring the network will disconnect us.
-    else
-        nErr = domeCommand("b#", szResp, 'b', SERIAL_BUFFER_SIZE);
+    if(m_bNetworkConnected) {
+        nErr = domeCommand("b#", sResp, 0x00); // we won't get an answer as reconfiguring the network will disconnect us.
+    }
+    else {
+        nErr = domeCommand("b#", sResp, 'b');
+    }
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::reconfigureNetwork] ERROR = %d\n", timestamp, nErr);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [reconfigureNetwork] ERROR = " <<nErr << std::endl;
+        m_sLogFile.flush();
 #endif
     }
     return nErr;
@@ -2440,94 +2406,87 @@ int CRTIDome::reconfigureNetwork()
 int CRTIDome::getUseDHCP(bool &bUseDHCP)
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    nErr = domeCommand("w#", szResp, 'w', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("w#", sResp, 'w');
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::getUseDHCP] ERROR = %d\n", timestamp, nErr);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getUseDHCP] ERROR = " <<nErr << std::endl;
+        m_sLogFile.flush();
 #endif
     }
-    bUseDHCP = (szResp[0] == '0'? false: true);
+    bUseDHCP = false;
+    if(sResp.size())
+        bUseDHCP = (sResp.at(0) == '0'? false: true);
     return nErr;
 }
 
 int CRTIDome::setUseDHCP(bool bUseDHCP)
 {
     int nErr = PLUGIN_OK;
-    char szBuf[SERIAL_BUFFER_SIZE];
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::stringstream ssTmp;
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    snprintf(szBuf, SERIAL_BUFFER_SIZE, "w%d#", bUseDHCP?1:0);
-    nErr = domeCommand(szBuf, szResp, 'w', SERIAL_BUFFER_SIZE);
+    ssTmp << "w" << (bUseDHCP?"1":"0") << "#";
+    nErr = domeCommand(ssTmp.str(), sResp, 'w');
     return nErr;
 }
 
 int CRTIDome::getIpAddress(std::string &IpAddress)
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    nErr = domeCommand("j#", szResp, 'j', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("j#", sResp, 'j');
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::getIpAddress] ERROR = %d\n", timestamp, nErr);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getIpAddress] ERROR = " <<nErr << std::endl;
+        m_sLogFile.flush();
 #endif
     }
-    IpAddress.assign(szResp);
+    IpAddress.assign(sResp);
     return nErr;
 }
 
 int CRTIDome::setIpAddress(std::string IpAddress)
 {
     int nErr = PLUGIN_OK;
-    char szBuf[SERIAL_BUFFER_SIZE];
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::stringstream ssTmp;
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    snprintf(szBuf, SERIAL_BUFFER_SIZE, "j%s#", IpAddress.c_str());
-    nErr = domeCommand(szBuf, szResp, 'j', SERIAL_BUFFER_SIZE);
+    ssTmp << "j" << IpAddress << "#";
+    nErr = domeCommand(ssTmp.str(), sResp, 'j');
     return nErr;
 }
 
 int CRTIDome::getSubnetMask(std::string &subnetMask)
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    nErr = domeCommand("p#", szResp, 'p', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("p#", sResp, 'p');
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::getSubnetMask] ERROR = %d\n", timestamp, nErr);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getSubnetMask] ERROR = " <<nErr << std::endl;
+        m_sLogFile.flush();
 #endif
     }
-    subnetMask.assign(szResp);
+    subnetMask.assign(sResp);
     return nErr;
 
 }
@@ -2535,92 +2494,86 @@ int CRTIDome::getSubnetMask(std::string &subnetMask)
 int CRTIDome::setSubnetMask(std::string subnetMask)
 {
     int nErr = PLUGIN_OK;
-    char szBuf[SERIAL_BUFFER_SIZE];
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::stringstream ssTmp;
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    snprintf(szBuf, SERIAL_BUFFER_SIZE, "p%s#", subnetMask.c_str());
-    nErr = domeCommand(szBuf, szResp, 'p', SERIAL_BUFFER_SIZE);
+    ssTmp << "p" << subnetMask << "#";
+    nErr = domeCommand(ssTmp.str(), sResp, 'p');
     return nErr;
 }
 
 int CRTIDome::getIPGateway(std::string &IpAddress)
 {
     int nErr = PLUGIN_OK;
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    nErr = domeCommand("u#", szResp, 'u', SERIAL_BUFFER_SIZE);
+    nErr = domeCommand("u#", sResp, 'u');
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::getIPGateway] ERROR = %d\n", timestamp, nErr);
-        fflush(Logfile);
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [getIPGateway] ERROR = " <<nErr << std::endl;
+        m_sLogFile.flush();
 #endif
     }
-    IpAddress.assign(szResp);
+    IpAddress.assign(sResp);
     return nErr;
 }
 
 int CRTIDome::setIPGateway(std::string IpAddress)
 {
     int nErr = PLUGIN_OK;
-    char szBuf[SERIAL_BUFFER_SIZE];
-    char szResp[SERIAL_BUFFER_SIZE];
+    std::stringstream ssTmp;
+    std::string sResp;
 
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
-    snprintf(szBuf, SERIAL_BUFFER_SIZE, "u%s#", IpAddress.c_str());
-    nErr = domeCommand(szBuf, szResp, 'u', SERIAL_BUFFER_SIZE);
+    ssTmp << "u" << IpAddress << "#";
+    nErr = domeCommand(ssTmp.str(), sResp, 'u');
     return nErr;
 }
 
 
-
-int CRTIDome::parseFields(const char *pszResp, std::vector<std::string> &svFields, char cSeparator)
+int CRTIDome::parseFields(const std::string sResp, std::vector<std::string> &svFields, char cSeparator)
 {
     int nErr = PLUGIN_OK;
     std::string sSegment;
-    if(!pszResp) {
-#ifdef PLUGIN_DEBUG
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::setDefaultDir] pszResp is NULL\n", timestamp);
-        fflush(Logfile);
+
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [parseFields] sResp = " << sResp << std::endl;
+    m_sLogFile.flush();
 #endif
-        return PLUGIN_COMMAND_FAILED; // MAKE_ERR_CODE(PLUGIN_ID, DriverRootInterface::DT_DOME, ERR_CMDFAILED);
+
+    if(sResp.size()==0) {
+        return MAKE_ERR_CODE(PLUGIN_ID, DOME, PLUGIN_COMMAND_FAILED);
     }
 
-    if(!strlen(pszResp)) {
-#ifdef PLUGIN_DEBUG
-        ltime = time(NULL);
-        timestamp = asctime(localtime(&ltime));
-        timestamp[strlen(timestamp) - 1] = 0;
-        fprintf(Logfile, "[%s] [CRTIDome::setDefaultDir] pszResp is enpty\n", timestamp);
-        fflush(Logfile);
-#endif
-        return PLUGIN_COMMAND_FAILED; // MAKE_ERR_CODE(PLUGIN_ID, DriverRootInterface::DT_DOME, ERR_CMDFAILED);
-    }
-    std::stringstream ssTmp(pszResp);
+    std::stringstream ssTmp(sResp);
 
     svFields.clear();
     // split the string into vector elements
     while(std::getline(ssTmp, sSegment, cSeparator))
     {
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 3
+        m_sLogFile << "["<<getTimeStamp()<<"]"<< " [parseFields] sSegment = " << sSegment << std::endl;
+        m_sLogFile.flush();
+#endif
         svFields.push_back(sSegment);
     }
 
     if(svFields.size()==0) {
-        nErr = PLUGIN_COMMAND_FAILED; // MAKE_ERR_CODE(PLUGIN_ID, DriverRootInterface::DT_DOME, ERR_CMDFAILED);
+        nErr = MAKE_ERR_CODE(PLUGIN_ID, DOME, PLUGIN_COMMAND_FAILED);
     }
+#if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
+    m_sLogFile << "["<<getTimeStamp()<<"]"<< " [parseFields] Done all good." << std::endl;
+    m_sLogFile.flush();
+#endif
+
     return nErr;
 }
 
@@ -2641,3 +2594,17 @@ void CRTIDome::getConnectionType(int &nConnectionType)
 {
     nConnectionType = m_DeviceConnectionType;
 }
+
+
+#ifdef PLUGIN_DEBUG
+const std::string CRTIDome::getTimeStamp()
+{
+    time_t     now = time(0);
+    struct tm  tstruct;
+    char       buf[80];
+    tstruct = *localtime(&now);
+    std::strftime(buf, sizeof(buf), "%Y-%m-%d.%X", &tstruct);
+
+    return buf;
+}
+#endif

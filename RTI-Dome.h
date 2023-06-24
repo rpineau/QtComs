@@ -8,8 +8,6 @@
 #ifndef __RTI_Dome__
 #define __RTI_Dome__
 
-#define SB_MAC_BUILD
-
 // standard C includes
 #include <stdlib.h>
 #include <stdio.h>
@@ -26,8 +24,11 @@
 #include <vector>
 #include <sstream>
 #include <iostream>
+#include <iomanip>
+#include <fstream>
 #include <chrono>
 #include <thread>
+#include <ctime>
 
 #include "deviceAccess.h"
 #include "serialPort.h"
@@ -36,35 +37,25 @@
 
 #include "StopWatch.h"
 
-#define MAKE_ERR_CODE(P_ID, DTYPE, ERR_CODE)  (((P_ID<<24) & 0xff000000) | ((DTYPE<<16) & 0x00ff0000)  | (ERR_CODE & 0x0000ffff))
-
 #define SERIAL_BUFFER_SIZE 256
-#define R_MAX_TIMEOUT 500
-#define MAX_READ_WAIT_TIMEOUT 250
-#define NB_RX_WAIT 3
+#define MAX_TIMEOUT 500
+#define MAX_READ_WAIT_TIMEOUT 25
+#define NB_RX_WAIT 10
 #define ND_LOG_BUFFER_SIZE 256
 #define PANID_TIMEOUT 15    // in seconds
 #define RAIN_CHECK_INTERVAL 10
 
-// to be unified latter
-#define FIRMWARE_NOT_SUPPORTED 1
-#define PLUGIN_RXTIMEOUT 2
-#define PLUGIN_DEVICEPARKED 3
-#define PLUGIN_CONNECTION_FAILED 4
-
-#define PLUGIN_VERSION      2.65
+#define PLUGIN_VERSION      1.33
 #define PLUGIN_ID   1
 
-#define PLUGIN_DEBUG 3
+// #define PLUGIN_DEBUG 2
 
-
-// error codes
 // Error code
-enum RTIDomeErrors {PLUGIN_OK=0, PLUGIN_NOT_CONNECTED, PLUGIN_CANT_CONNECT, BAD_CMD_RESPONSE, PLUGIN_COMMAND_FAILED, RTI_COMMAND_TIMEOUT};
-enum RTIDomeShutterState {OPEN = 0, CLOSED, OPENING, CLOSING, BOTTOM_OPEN, BOTTOM_CLOSED, BOTTOM_OPENING, BOTTOM_CLOSING, SHUTTER_ERROR };
+enum RTIDomeShutterState { OPEN=0 , CLOSED, OPENING, CLOSING, BOTTOM_OPEN, BOTTOM_CLOSED, BOTTOM_OPENING, BOTTOM_CLOSING, SHUTTER_ERROR, FINISHING_OPEN, FINISHING_CLOSE };
+
 enum HomeStatuses {NOT_AT_HOME = 0, HOMED, ATHOME};
 enum RainActions {DO_NOTHING=0, HOME, PARK};
-
+enum MoveDirection {MOVE_NEGATIVE = -1, MOVE_NONE, MOVE_POSITIVE};
 // RG-11
 enum RainSensorStates {RAINING= 0, NOT_RAINING, RAIN_UNKNOWN};
 
@@ -85,9 +76,9 @@ public:
     int gotoAzimuth(double dNewAz);
     int openShutter();
     int closeShutter();
-    int getFirmwareVersion(char *szVersion, int nStrMaxLen);
+    int getFirmwareVersion(std::string &sVersion, float &fVersion);
     int getFirmwareVersion(float &fVersion);
-    int getShutterFirmwareVersion(char *szVersion, int nStrMaxLen);
+    int getShutterFirmwareVersion(std::string &sVersion, float &fVersion);
     int goHome();
     int calibrate();
 
@@ -118,7 +109,6 @@ public:
     double getCurrentAz();
     double getCurrentEl();
 
-    int getCurrentShutterState();
     int getBatteryLevels(double &domeVolts, double &dDomeCutOff, double &dShutterVolts, double &dShutterCutOff);
     int setBatteryCutOff(double dDomeCutOff, double dShutterCutOff);
 
@@ -179,11 +169,11 @@ public:
     void        setConnectionType(const int nConnectionType);
     void        getConnectionType(int &nConnectionType);
 
-
 protected:
 
-    int             domeCommand(const char *cmd, char *result, char respCmdCode, int resultMaxLen, int nTimeout = R_MAX_TIMEOUT);
-    int             readResponse(char *respBuffer, int nBufferLen, int nTimeout = R_MAX_TIMEOUT);
+    int             domeCommand(const std::string sCmd, std::string &sResp, char respCmdCode, int nTimeout = MAX_TIMEOUT);
+    int             readResponse(std::string &sResp, int nTimeout = MAX_TIMEOUT);
+
     int             getDomeAz(double &dDomeAz);
     int             getDomeEl(double &dDomeEl);
     int             getDomeHomeAz(double &dAz);
@@ -194,15 +184,15 @@ protected:
 
     bool            isDomeMoving();
     bool            isDomeAtHome();
-    int             parseFields(const char *pszResp, std::vector<std::string> &svFields, char cSeparator);
+    int             parseFields(std::string sResp, std::vector<std::string> &svFields, char cSeparator);
+
+    bool            checkBoundaries(double dTargetAz, double dDomeAz, double nMargin=2.0);
 
     deviceAccess    *m_devicePort;
 
     int             m_DeviceConnectionType;
-
     std::string     m_DeviceName;
     int             m_nDevicePort;
-
     bool            m_bNetworkConnected;
 
     bool            m_bIsConnected;
@@ -221,12 +211,14 @@ protected:
 
     double          m_dGotoAz;
 
-    float           m_fVersion;
 
-    char            m_szFirmwareVersion[SERIAL_BUFFER_SIZE];
+    std::string     m_sFirmwareVersion;
+    float           m_fVersion;
+    std::string     m_sShutterFirmwareVersion;
+    float           m_fShutterVersion;
+
     int             m_nShutterState;
     bool            m_bShutterOnly; // roll off roof so the arduino is running the shutter firmware only.
-    char            m_szLogBuffer[ND_LOG_BUFFER_SIZE];
     int             m_nHomingTries;
     int             m_nGotoTries;
     bool            m_bParking;
@@ -237,7 +229,7 @@ protected:
     bool            m_bShutterPresent;
 
     std::string     m_sRainStatusfilePath;
-    FILE            *RainStatusfile;
+    std::ofstream   m_RainStatusfile;
     bool            m_bSaveRainStatus;
     int             m_nRainStatus;
     CStopWatch      m_cRainCheckTimer;
@@ -250,11 +242,10 @@ protected:
     void            msSleep(int sleepMs); // Platform independent sleep
 
 #ifdef PLUGIN_DEBUG
-    std::string m_sLogfilePath;
     // timestamp for logs
-    char *timestamp;
-    time_t ltime;
-    FILE *Logfile;	  // LogFile
+    const std::string getTimeStamp();
+    std::ofstream m_sLogFile;
+    std::string m_sLogfilePath;
 #endif
 
 };
