@@ -9,7 +9,8 @@
 int main(int argc, char *argv[])
 {
     int nErr = DMFC_OK;
-    char szFirmware[256];
+    std::string sFirmware;
+    float fFirmware;
     int nPos;
     unsigned int i = 0;
     bool bGotoComplete;
@@ -22,7 +23,7 @@ int main(int argc, char *argv[])
     double dAz;
     bool bComplete;
     bool bShutterPresent;
-
+    std::string sShuterState;
     serialPort::getPortList(portList);
 
     for(i=0;i<portList.size(); i++) {
@@ -43,7 +44,6 @@ int main(int argc, char *argv[])
         }
 */
     }
-
 /*
     CRTIDome mDome;
 
@@ -56,14 +56,14 @@ int main(int argc, char *argv[])
     }
     printf("Connected to dome\n");
 
-    nErr = mDome.getFirmwareVersion(szFirmware, 256);
+    nErr = mDome.getFirmwareVersion(sFirmware, fFirmware);
     if(nErr) {
         printf("Error getting firmware : %d\n", nErr);
         return nErr;
     }
 
     // while(true) {
-        printf("Firmware : %s\n", szFirmware);
+        printf("Firmware : %s\n", sFirmware.c_str());
         dHomeAz = mDome.getHomeAz();
         printf("dHomeAz : %3.2f\n", dHomeAz);
         dParkAz = mDome.getParkAz();
@@ -72,18 +72,26 @@ int main(int argc, char *argv[])
         printf("dAz : %3.2f\n", dAz);
         mDome.getShutterPresent(bShutterPresent);
         printf("getShutterPresent : %s\n", bShutterPresent?"Yes":"No");
-        i = mDome.getCurrentShutterState();
-        printf("Shutter State : %d\n", i);
+        mDome.isOpenComplete(bComplete);
+        if(bComplete)
+            sShuterState="Open";
+        else {
+            mDome.isCloseComplete(bComplete);
+            if(bComplete)
+                sShuterState="Closed";
+            else
+                sShuterState="Uknown";
+        }
+        printf("Shutter State : %s\n", sShuterState.c_str());
         mDome.isOpenComplete(bComplete);
         printf("isOpenComplete : %s\n", bComplete?"Yes":"No");
         mDome.isCloseComplete(bComplete);
         printf("isCloseComplete : %s\n", bComplete?"Yes":"No");
     // }
     mDome.Disconnect();
-    */
-    /*
-    serialPort::getPortList(portList);
+*/
 
+/*
     CPegasusController mDMFC;
     CRTIDome mDome;
 
