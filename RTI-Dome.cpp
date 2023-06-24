@@ -15,7 +15,7 @@ CRTIDome::CRTIDome()
     m_devicePort = NULL;
     m_DeviceConnectionType = TYPE_UNKNOWN;
 
-    
+
     m_nNbStepPerRev = 0;
     m_dShutterBatteryVolts = 0.0;
 
@@ -46,25 +46,25 @@ CRTIDome::CRTIDome()
     m_bHomeOnUnpark = false;
 
     m_bShutterPresent = false;
-    
+
     m_nRainStatus = RAIN_UNKNOWN;
 
     m_DeviceName.clear();
     m_nDevicePort = 0;
-    
+
     m_bNetworkConnected = false;
-    
+
     m_IpAddress.clear();
     m_SubnetMask.clear();
     m_GatewayIP.clear();
     m_bUseDHCP = false;
-    
+
     m_nShutterState = CLOSED;
-    
+
 #ifdef    PLUGIN_DEBUG
     Logfile = NULL;
 #endif
-    
+
     memset(m_szFirmwareVersion,0,SERIAL_BUFFER_SIZE);
     memset(m_szLogBuffer,0,ND_LOG_BUFFER_SIZE);
 
@@ -94,7 +94,7 @@ CRTIDome::CRTIDome()
     m_sRainStatusfilePath = getenv("HOME");
     m_sRainStatusfilePath += "/RTI_Rain.txt";
 #endif
-    
+
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
     ltime = time(NULL);
     timestamp = asctime(localtime(&ltime));
@@ -125,7 +125,7 @@ int CRTIDome::Connect(const char *pszPort, const char *IpAddr, int nIpPort)
     int nErr;
     bool bConnectionOpen;
     bool bDummy;
-    
+
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
     ltime = time(NULL);
     timestamp = asctime(localtime(&ltime));
@@ -180,7 +180,7 @@ int CRTIDome::Connect(const char *pszPort, const char *IpAddr, int nIpPort)
             return PLUGIN_CONNECTION_FAILED;
         }
     }
-    
+
     m_bIsConnected = true;
     m_bCalibrating = false;
     m_bUnParking = false;
@@ -265,7 +265,7 @@ int CRTIDome::Connect(const char *pszPort, const char *IpAddr, int nIpPort)
     }
 
     sendShutterHello();
-    mySleep(250);
+    msSleep(250);
     getShutterPresent(bDummy);
     // we need to get the initial state
     getShutterState(m_nShutterState);
@@ -300,11 +300,11 @@ int CRTIDome::domeCommand(const char *pszCmd, char *pszResult, char respCmdCode,
     char szResp[SERIAL_BUFFER_SIZE];
     int  nBytesWrite;
     bool bWriteOk;
-    
+
     if(!m_devicePort->isOpened()) {
         return PLUGIN_NOT_CONNECTED;
     }
-    
+
     m_devicePort->clearRxTxBuffers();
 
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
@@ -361,10 +361,10 @@ int CRTIDome::readResponse(char *szRespBuffer, int nBufferLen, int nTimeout)
     char *pszBufPtr;
     int nBytesWaiting = 0 ;
     int nbTimeouts = 0;
-    
+
     memset(szRespBuffer, 0, (size_t) nBufferLen);
     pszBufPtr = szRespBuffer;
-    
+
     do {
         nBytesWaiting = m_devicePort->bytesAvailable();
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 3
@@ -386,7 +386,7 @@ int CRTIDome::readResponse(char *szRespBuffer, int nBufferLen, int nTimeout)
                 nErr = PLUGIN_RXTIMEOUT;
                 break;
             }
-            mySleep(MAX_READ_WAIT_TIMEOUT*5);
+            msSleep(MAX_READ_WAIT_TIMEOUT*5);
             continue;
         }
         nbTimeouts = 0;
@@ -406,7 +406,7 @@ int CRTIDome::readResponse(char *szRespBuffer, int nBufferLen, int nTimeout)
 #endif
             return nErr;
         }
-        
+
         if (nBytesRead != nBytesWaiting) { // timeout
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
             ltime = time(NULL);
@@ -418,16 +418,16 @@ int CRTIDome::readResponse(char *szRespBuffer, int nBufferLen, int nTimeout)
             fflush(Logfile);
 #endif
         }
-        
+
         nTotalBytesRead += nBytesRead;
         pszBufPtr+=nBytesRead;
     } while (nTotalBytesRead < nBufferLen  && *(pszBufPtr-1) != '#');
-    
+
     if(!nTotalBytesRead)
         nErr = PLUGIN_RXTIMEOUT; // we didn't get an answer.. so timeout
     else
         *(pszBufPtr-1) = 0; //remove the #
-    
+
     return nErr;
 }
 
@@ -723,7 +723,7 @@ int CRTIDome::getBatteryLevels(double &domeVolts, double &dDomeCutOff, double &d
     dShutterCutOff = 0;
     if(m_bShutterPresent) {
             //  Shutter
-            
+
             nErr = domeCommand("K#", szResp, 'K', SERIAL_BUFFER_SIZE);
             if(nErr) {
         #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
@@ -809,7 +809,7 @@ int CRTIDome::setBatteryCutOff(double dDomeCutOff, double dShutterCutOff)
 
     if(m_bShutterPresent) {
         // Shutter
-        
+
         snprintf(szBuf, SERIAL_BUFFER_SIZE, "K%d#", nShutCutOff);
         nErr = domeCommand(szBuf, szResp, 'K', SERIAL_BUFFER_SIZE);
         if(nErr) {
@@ -1035,13 +1035,13 @@ int CRTIDome::openShutter()
     double dDomeCutOff;
     double dShutterVolts;
     double dShutterCutOff;
-    
+
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
     if(m_bCalibrating)
         return PLUGIN_OK;
-    
+
     getShutterPresent(bDummy);
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
     ltime = time(NULL);
@@ -1063,7 +1063,7 @@ int CRTIDome::openShutter()
     fflush(Logfile);
 #endif
 
-	
+
     nErr = domeCommand("O#", szResp, 'O', SERIAL_BUFFER_SIZE);
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
@@ -1096,7 +1096,7 @@ int CRTIDome::closeShutter()
     double dDomeCutOff;
     double dShutterVolts;
     double dShutterCutOff;
-    
+
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
@@ -1125,7 +1125,7 @@ int CRTIDome::closeShutter()
     fflush(Logfile);
 #endif
 
-	
+
     nErr = domeCommand("C#", szResp, 'C', SERIAL_BUFFER_SIZE);
     if(nErr) {
 #if defined PLUGIN_DEBUG && PLUGIN_DEBUG >= 2
@@ -1412,7 +1412,7 @@ int CRTIDome::isCloseComplete(bool &bComplete)
 {
     int nErr = PLUGIN_OK;
     bool bDummy;
-    
+
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
@@ -1705,7 +1705,7 @@ int CRTIDome::sendShutterHello()
         return PLUGIN_OK;
     }
 
-	
+
 	if(m_fVersion>=2.0f)
         nErr = domeCommand("H#", szResp, 'H', SERIAL_BUFFER_SIZE);
     else
@@ -2017,7 +2017,7 @@ int CRTIDome::getShutterSpeed(int &nSpeed)
         return PLUGIN_OK;
     }
 
-	
+
     nErr = domeCommand("R#", szResp, 'R', SERIAL_BUFFER_SIZE);
     if(nErr) {
         return nErr;
@@ -2048,7 +2048,7 @@ int CRTIDome::setShutterSpeed(int nSpeed)
         return PLUGIN_OK;
     }
 
-	
+
     snprintf(szBuf, SERIAL_BUFFER_SIZE, "R%d#", nSpeed);
     nErr = domeCommand(szBuf, szResp, 'R', SERIAL_BUFFER_SIZE);
 
@@ -2068,7 +2068,7 @@ int CRTIDome::getShutterAcceleration(int &nAcceleration)
         return PLUGIN_OK;
     }
 
-	
+
     nErr = domeCommand("E#", szResp, 'E', SERIAL_BUFFER_SIZE);
     if(nErr) {
         return nErr;
@@ -2098,7 +2098,7 @@ int CRTIDome::setShutterAcceleration(int nAcceleration)
         return PLUGIN_OK;
     }
 
-	
+
     snprintf(szBuf, SERIAL_BUFFER_SIZE, "E%d#", nAcceleration);
     nErr = domeCommand(szBuf, szResp, 'E', SERIAL_BUFFER_SIZE);
     return nErr;
@@ -2127,7 +2127,7 @@ int	CRTIDome::getSutterWatchdogTimerValue(int &nValue)
         return PLUGIN_OK;
     }
 
-	
+
 	nErr = domeCommand("I#", szResp, 'I', SERIAL_BUFFER_SIZE);
 	if(nErr) {
 		return nErr;
@@ -2157,7 +2157,7 @@ int	CRTIDome::setSutterWatchdogTimerValue(const int &nValue)
         return PLUGIN_OK;
     }
 
-	
+
 	snprintf(szBuf, SERIAL_BUFFER_SIZE, "I%d#", nValue * 1000); // value is in ms
 	nErr = domeCommand(szBuf, szResp, 'I', SERIAL_BUFFER_SIZE);
 	return nErr;
@@ -2273,14 +2273,14 @@ int CRTIDome::isPanIdSet(const int nPanId, bool &bSet)
 {
     int nErr = PLUGIN_OK;
     int nCtrlPanId;
-    
+
     bSet = false;
     nErr = getShutterPanId(nCtrlPanId);
     if(nErr)
         return nErr;
     if(nCtrlPanId == nPanId)
         bSet = true;
-    
+
     return nErr;
 }
 
@@ -2312,7 +2312,7 @@ int CRTIDome::restoreShutterMotorSettings()
     int nErr = PLUGIN_OK;
     char szResp[SERIAL_BUFFER_SIZE];
     int nDummy;
-    
+
     if(!m_bIsConnected)
         return PLUGIN_NOT_CONNECTED;
 
@@ -2627,7 +2627,7 @@ int CRTIDome::parseFields(const char *pszResp, std::vector<std::string> &svField
 //
 // Platform independent sleep
 //
-void CRTIDome::mySleep(int sleepMs)
+void CRTIDome::msSleep(int sleepMs)
 {
     std::this_thread::sleep_for(std::chrono::milliseconds(sleepMs));
 }

@@ -45,8 +45,8 @@ public:
     virtual void    setReadBufferSize(const int &nBufferSize);
 
 private:
-    
-    void            mySleep(int sleepMs); // Platform independent sleep
+
+    void            msSleep(int sleepMs); // Platform independent sleep
 
     QTcpSocket                  m_TCPDeviceConnection;
     QString                     m_HostName;

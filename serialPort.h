@@ -72,7 +72,7 @@ public:
 
 private:
 
-    void            mySleep(int sleepMs); // Platform independent sleep
+    void            msSleep(int sleepMs); // Platform independent sleep
 
     QSerialPort                 m_SerialDeviceConnection;
     QString                     m_PortName;

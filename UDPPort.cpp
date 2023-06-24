@@ -115,10 +115,10 @@ int UDPDevice::bytesAvailable()
     if(!isOpened()) {
         return 0;
     }
-    
+
     if(!m_UDPDeviceConnection.waitForReadyRead(1000))
         return 0; // we had a timeout
-    
+
     return int(m_UDPDeviceConnection.bytesAvailable());
 }
 
@@ -140,7 +140,7 @@ bool UDPDevice::waitForDataReady(const int &nbBytes, const int &msTimeout)
             if(nbByteAvail == 0)
                 nTimeout += 1000; //  bytesAvailable timeout after 1000ms so add this to the current total timeout counter
             else {
-                mySleep(10);
+                msSleep(10);
                 nTimeout += 10; //  we waited 10ms so add this to the current total timeout counter
             }
         }
@@ -195,7 +195,7 @@ void UDPDevice::setReadBufferSize(const int &nBufferSize)
 //
 // Platform independent sleep
 //
-void UDPDevice::mySleep(int sleepMs)
+void UDPDevice::msSleep(int sleepMs)
 {
     std::this_thread::sleep_for(std::chrono::milliseconds(sleepMs));
 }
