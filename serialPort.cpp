@@ -294,7 +294,6 @@ void serialPort::getPortListWithInfo(std::vector<std::vector<std::string>> &port
     for (const QSerialPortInfo &portInfo : myList) {
         portEntryInfo.clear();
         if(!portInfo.portName().startsWith("tty.", Qt::CaseInsensitive) ) {// for macOS
-            printf("%s : %s\n", portInfo.portName().toUtf8().constData(), portInfo.description().toUtf8().constData());
             tmpPortList.push_back(portInfo.portName().toUtf8().constData());
             portEntryInfo.push_back(portInfo.portName().toUtf8().constData());
             portEntryInfo.push_back(portInfo.description().toUtf8().constData());
@@ -316,7 +315,6 @@ void serialPort::getPortListWithInfo(std::vector<std::vector<std::string>> &port
             it = std::find(tmpPortList.begin(), tmpPortList.end(), sTmp);
             if (it != tmpPortList.end()) {
                 portEntryInfo.clear();
-                printf("Symlink to %s : %s added \n", it->c_str(), fileInfo.fileName().toStdString().c_str());
                 portEntryInfo.push_back(fileInfo.fileName().toStdString());
                 portEntryInfo.push_back(std::string("Symlink to ").append(*it));
                 portList.push_back(portEntryInfo);

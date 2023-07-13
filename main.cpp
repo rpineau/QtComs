@@ -28,12 +28,12 @@ int main(int argc, char *argv[])
     serialPort::getPortList(portList);
     serialPort::getPortListWithInfo(portListWithInfo);
 
-    for(i=0;i<portList.size(); i++) {
-        std::cout << "Port "<< portList.at(i) << " detected." << std::endl;
-    }
+    //for(i=0;i<portList.size(); i++) {
+    //    std::cout << "Port "<< portList.at(i) << " detected." << std::endl;
+    //}
 
     for(i=0;i<portListWithInfo.size(); i++) {
-        std::cout << "Port "<< portListWithInfo.at(i).at(0) << " [ " << portListWithInfo.at(i).at(1) << " ] detected." << std::endl;
+        std::cout << "Port "<< portListWithInfo.at(i).at(0) << " [ " << portListWithInfo.at(i).at(1) << " ]" << std::endl;
 
 /*
         printf("Opening %s\n", portList.at(i).c_str());
