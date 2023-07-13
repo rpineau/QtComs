@@ -33,7 +33,7 @@ int main(int argc, char *argv[])
     //}
 
     for(i=0;i<portListWithInfo.size(); i++) {
-        std::cout << "Port "<< portListWithInfo.at(i).at(0) << " [ " << portListWithInfo.at(i).at(1) << " ]" << std::endl;
+    std::cout << "Port "<< portListWithInfo.at(i).at(0) << " [ " << portListWithInfo.at(i).at(1) << " ]" << std::endl;
 
 /*
         printf("Opening %s\n", portList.at(i).c_str());
