@@ -15,6 +15,7 @@ int main(int argc, char *argv[])
     unsigned int i = 0;
     bool bGotoComplete;
     std::vector<std::string> portList;
+    std::vector<std::vector<std::string>> portListWithInfo;
     QCoreApplication coreApplication(argc, argv);
     const int argumentCount = QCoreApplication::arguments().size();
     const QStringList argumentList = QCoreApplication::arguments();
@@ -25,9 +26,15 @@ int main(int argc, char *argv[])
     bool bShutterPresent;
     std::string sShuterState;
     serialPort::getPortList(portList);
+    serialPort::getPortListWithInfo(portListWithInfo);
 
-    for(i=0;i<portList.size(); i++) {
-        printf("Port %s detected\n", portList.at(i).c_str());
+    //for(i=0;i<portList.size(); i++) {
+    //    std::cout << "Port "<< portList.at(i) << " detected." << std::endl;
+    //}
+
+    for(i=0;i<portListWithInfo.size(); i++) {
+    std::cout << "Port "<< portListWithInfo.at(i).at(0) << " [ " << portListWithInfo.at(i).at(1) << " ]" << std::endl;
+
 /*
         printf("Opening %s\n", portList.at(i).c_str());
         bool b_open = false;

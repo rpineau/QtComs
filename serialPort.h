@@ -66,6 +66,7 @@ public:
 
     // port list
     static void    getPortList(std::vector<std::string> &portList);
+    static void    getPortListWithInfo( std::vector<std::vector<std::string>> &portList);
 
     // buffer management
     virtual void    setReadBufferSize(const int &nBufferSize);

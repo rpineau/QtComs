@@ -282,6 +282,49 @@ void serialPort::getPortList(std::vector<std::string> &portList)
 #endif
 }
 
+void serialPort::getPortListWithInfo(std::vector<std::vector<std::string>> &portList)
+{
+    QList<QSerialPortInfo> myList;
+    std::vector<std::string> portEntryInfo;
+    std::vector<std::string> tmpPortList;
+
+    portList.clear();
+    // get serial devices
+    myList = QSerialPortInfo::availablePorts();
+    for (const QSerialPortInfo &portInfo : myList) {
+        portEntryInfo.clear();
+        if(!portInfo.portName().startsWith("tty.", Qt::CaseInsensitive) ) {// for macOS
+            tmpPortList.push_back(portInfo.portName().toUtf8().constData());
+            portEntryInfo.push_back(portInfo.portName().toUtf8().constData());
+            portEntryInfo.push_back(portInfo.description().toUtf8().constData());
+            portList.push_back(portEntryInfo);
+        }
+    }
+#ifndef _WIN32
+    // get symlinks
+    QDir deviceDir("/dev");
+    std::string sTmp;
+    std::vector<std::string>::iterator it;
+    QFileInfo fileInfo;
+    deviceDir.setFilter(QDir::Files);
+    QFileInfoList fileList = deviceDir.entryInfoList();
+    for (int i = 0; i < fileList.size(); ++i) {
+        fileInfo = fileList.at(i);
+        if(fileInfo.isSymLink()) {
+            sTmp = QFileInfo(fileInfo.symLinkTarget()).baseName().toStdString();
+            it = std::find(tmpPortList.begin(), tmpPortList.end(), sTmp);
+            if (it != tmpPortList.end()) {
+                portEntryInfo.clear();
+                portEntryInfo.push_back(fileInfo.fileName().toStdString());
+                portEntryInfo.push_back(std::string("Symlink to ").append(*it));
+                portList.push_back(portEntryInfo);
+            }
+        }
+    }
+#endif
+
+}
+
 void serialPort::setReadBufferSize(const int &nBufferSize)
 {
     m_ReadBufferSize = qint64(nBufferSize);
